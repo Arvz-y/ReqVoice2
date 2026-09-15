@@ -5,7 +5,7 @@ import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
-  base: '/ReqVoice2/',
+  base: '/',
   plugins: [
     react(),
     tailwindcss(),
