@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      // Suppress benign [vite] dev-server websocket connection notices in iframe preview
+      (function() {
+        var origError = console.error;
+        console.error = function() {
+          var first = arguments[0];
+          if (
+            typeof first === 'string' &&
+            (first === '[vite]' ||
+             first.indexOf('[vite]') === 0 ||
+             first.indexOf('vite-plugin-pwa') !== -1 ||
+             first.indexOf('WebSocket') !== -1)
+          ) {
+            console.warn.apply(console, arguments);
+            return;
+          }
+          origError.apply(console, arguments);
+        };
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>reqvoiceV2 - Systems Requirements Interview Intelligence Platform</title>
+    <meta name="description" content="Enterprise Systems Requirements Interview Intelligence Platform V2 with Video Capture, SD Compression, and Gemini AI Verbatim Transcription." />
+    <meta property="og:title" content="reqvoiceV2 - Systems Requirements Interview Intelligence Platform" />
+    <meta property="og:description" content="Enterprise Systems Requirements Interview Intelligence Platform V2 with Video Capture, SD Compression, and Gemini AI Verbatim Transcription." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Mobile Web App & PWA Capabilities -->
+    <meta name="theme-color" content="#020617" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="reqvoiceV2" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+
+    <!-- Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-slate-950 text-slate-100 antialiased overscroll-none select-none touch-manipulation">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
