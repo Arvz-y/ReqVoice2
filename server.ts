@@ -1518,9 +1518,11 @@ const ensureCompatibleVideoDelivery = async (videoId: string) => {
     return record;
   }
 
-  // If an original recording is already stored in SQLite, it is immediately
-  // playable as a fallback. Never make a client request wait on FFmpeg.
-  if (record.originalBuffer.length > 1024 && !ffmpegPath) {
+  // For slow connections, never make playback wait for a server-side conversion.
+  // The original recording is already complete and stored in SQLite, so return it
+  // immediately. The browser/device can request only the byte ranges it needs.
+  // MP4 conversion remains an optional background optimization.
+  if (record.originalBuffer.length > 1024) {
     return record;
   }
 
@@ -1597,7 +1599,8 @@ const streamStoredVideo = (req: Request, res: Response, download = false) => {
   const total = stored.buffer.length;
   res.setHeader("Accept-Ranges", "bytes");
   res.setHeader("Content-Type", stored.mimeType);
-  res.setHeader("Cache-Control", "private, max-age=3600");
+  res.setHeader("Cache-Control", "private, max-age=86400, immutable");
+  res.setHeader("X-Content-Type-Options", "nosniff");
   if (download) {
     res.setHeader("Content-Disposition", `attachment; filename="reqvoice_recording_${req.params.id}.webm"`);
   }
@@ -1633,7 +1636,8 @@ const streamBufferWithRanges = (req: Request, res: Response, buffer: Buffer, mim
   if (!total) { res.status(404).json({ error: "Recorded video is empty." }); return; }
   res.setHeader("Accept-Ranges", "bytes");
   res.setHeader("Content-Type", mimeType);
-  res.setHeader("Cache-Control", "private, max-age=3600");
+  res.setHeader("Cache-Control", "private, max-age=86400, immutable");
+  res.setHeader("X-Content-Type-Options", "nosniff");
   if (downloadName) res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
   const range = req.headers.range;
   if (!range) { res.setHeader("Content-Length", total); res.status(200).end(buffer); return; }
@@ -1657,7 +1661,8 @@ const streamFileWithRanges = (req: Request, res: Response, filePath: string, mim
   const total = fs.statSync(filePath).size;
   res.setHeader("Accept-Ranges", "bytes");
   res.setHeader("Content-Type", mimeType);
-  res.setHeader("Cache-Control", "private, max-age=3600");
+  res.setHeader("Cache-Control", "private, max-age=86400, immutable");
+  res.setHeader("X-Content-Type-Options", "nosniff");
   if (downloadName) {
     res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
   }
