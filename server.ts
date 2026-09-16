@@ -674,10 +674,7 @@ function sanitizeUser(user: StoredUser): Omit<StoredUser, "password"> {
   const { password, ...safeUser } = user;
   return safeUser;
 }
-function sanitizeUser(user: StoredUser): Omit<StoredUser, "password"> {
-  const { password, ...safeUser } = user;
-  return safeUser;
-}
+
 
 function getAuthUser(req: Request): StoredUser | null {
   const authHeader = req.headers.authorization;
