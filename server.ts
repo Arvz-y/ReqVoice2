@@ -1871,23 +1871,28 @@ const ensureCompatibleVideoDelivery = async (videoId: string) => {
   // have the recording, restore it from Supabase Storage before attempting
   // playback. The interviewer must never depend on the instance that received
   // the original upload.
-  if (!record && supabase) {
+  // A Render restart/deploy can leave a local SQLite row without its BLOB,
+  // or no local row at all. In either case, Supabase Storage is the durable
+  // source of truth and must be consulted before returning a 404.
+  if ((!record || !record.originalBuffer?.length) && supabase) {
     try {
       const remoteVideo = await getRemoteVideoBuffer(videoId);
-      if (remoteVideo) {
+      if (remoteVideo?.buffer?.length) {
         const detected = detectVideoContainer(remoteVideo.buffer.subarray(0, 16));
         const sourceMimeType = remoteVideo.mimeType || detected?.mimeType || "video/webm";
         const sourceExtension = detected?.extension || (sourceMimeType.includes("mp4") ? "mp4" : sourceMimeType.includes("ogg") ? "ogg" : "webm");
         saveVideoToDatabase({
           id: videoId,
+          interviewId: record?.interviewId || "remote",
+          questionId: record?.questionId,
           sourceMimeType,
           sourceExtension,
           originalBuffer: remoteVideo.buffer,
           deliveryMimeType: sourceMimeType,
           deliveryBuffer: null,
           storagePath: null,
-          durationSeconds: 0,
-          recordedAt: new Date().toISOString(),
+          durationSeconds: record?.durationSeconds || 0,
+          recordedAt: record?.recordedAt || new Date().toISOString(),
         });
         record = getVideoDatabaseRecord(videoId);
       }
