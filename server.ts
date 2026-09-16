@@ -835,7 +835,7 @@ app.get("/api/interviews", (req: Request, res: Response) => {
 
 app.get("/api/interviews/:id", (req: Request, res: Response) => {
   const user = getAuthUser(req);
-  const interview = interviewsDb.find((i) => i.id === req.params.id);
+  const interview = loadInterviewsFromDatabase().find((i) => i.id === req.params.id);
   if (!interview) {
     res.status(404).json({ error: "Interview record not found" });
     return;
@@ -1187,7 +1187,7 @@ app.delete("/api/interviews/:id", (req: Request, res: Response) => {
 
 // 4. Public Share Portal for Interviewee
 app.get("/api/share/:token", (req: Request, res: Response) => {
-  const interview = interviewsDb.find((i) => i.shareToken === req.params.token);
+  const interview = loadInterviewsFromDatabase().find((i) => i.shareToken === req.params.token);
   if (!interview) {
     res.status(404).json({ error: "This interview link is either invalid, expired, or has been deactivated." });
     return;
