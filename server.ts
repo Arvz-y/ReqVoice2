@@ -3127,203 +3127,114 @@ CREATE TABLE IF NOT EXISTS video_compression_vault (
 
 // Single-File MySQL Dump (.sql) with Schema and Data
 app.get("/api/database/mysql-dump", (req: Request, res: Response) => {
-  const escapeSql = (str: string | undefined | null) => {
-    if (!str) return "''";
-    return `'${str.replace(/[\0\x08\x09\x1a\n\r"'\\\%]/g, (char) => {
-      switch (char) {
-        case "\0": return "\\0";
-        case "\x08": return "\\b";
-        case "\x09": return "\\t";
-        case "\x1a": return "\\z";
-        case "\n": return "\\n";
-        case "\r": return "\\r";
-        case "\"": case "'": case "\\": case "%":
-          return "\\" + char;
-        default: return char;
-      }
-    })}'`;
+  const escapeSql = (value: unknown): string => {
+    if (value === null || value === undefined) return "NULL";
+    const str = String(value);
+    return "'" + str
+      .replace(/\\/g, "\\\\")
+      .replace(/'/g, "''")
+      .replace(/\r/g, "\\r")
+      .replace(/\n/g, "\\n")
+      .replace(/\0/g, "\\0") + "'";
   };
 
-  let sql = `-- =========================================================================
--- ReqVoice AI - Complete MySQL Relational Database Export
--- Generated: ${new Date().toISOString()}
--- Database Server: MySQL 8.0 Compatible
--- =========================================================================
+  const lines: string[] = [];
+  lines.push("-- ReqVoice AI MySQL export");
+  lines.push("-- Generated: " + new Date().toISOString());
+  lines.push("SET FOREIGN_KEY_CHECKS = 0;");
+  lines.push("SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';");
+  lines.push("START TRANSACTION;");
+  lines.push("SET time_zone = '+00:00';");
+  lines.push("CREATE DATABASE IF NOT EXISTS reqvoice_db DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;");
+  lines.push("USE reqvoice_db;");
+  lines.push("");
 
-SET FOREIGN_KEY_CHECKS = 0;
-SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
-START TRANSACTION;
-SET time_zone = "+00:00";
+  lines.push("DROP TABLE IF EXISTS interview_responses;");
+  lines.push("DROP TABLE IF EXISTS interviews;");
+  lines.push("DROP TABLE IF EXISTS systems_under_study;");
+  lines.push("DROP TABLE IF EXISTS users;");
+  lines.push("");
 
-CREATE DATABASE IF NOT EXISTS \`reqvoice_db\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE \`reqvoice_db\`;
+  lines.push("CREATE TABLE users (" +
+    "id varchar(64) NOT NULL, name varchar(128) NOT NULL, username varchar(64) NOT NULL UNIQUE, " +
+    "email varchar(191) NOT NULL UNIQUE, password_hash varchar(255) NOT NULL, role varchar(128) NOT NULL, " +
+    "department varchar(128) NOT NULL, avatar_url text, bio text, is_first_time tinyint(1) DEFAULT 1, " +
+    "has_completed_tutorial tinyint(1) DEFAULT 0, created_at datetime DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (id)" +
+    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  lines.push("");
 
--- --------------------------------------------------------
--- Table: \`users\`
--- --------------------------------------------------------
-DROP TABLE IF EXISTS \`users\`;
-CREATE TABLE \`users\` (
-  \`id\` varchar(64) NOT NULL,
-  \`name\` varchar(128) NOT NULL,
-  \`username\` varchar(64) NOT NULL UNIQUE,
-  \`email\` varchar(191) NOT NULL UNIQUE,
-  \`password_hash\` varchar(255) NOT NULL,
-  \`role\` varchar(128) NOT NULL,
-  \`department\` varchar(128) NOT NULL,
-  \`avatar_url\` text,
-  \`bio\` text,
-  \`is_first_time\` tinyint(1) DEFAULT 1,
-  \`has_completed_tutorial\` tinyint(1) DEFAULT 0,
-  \`created_at\` datetime DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (\`id\`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  for (const u of usersDb) {
+    lines.push("INSERT INTO users (id,name,username,email,password_hash,role,department,avatar_url,bio,is_first_time,has_completed_tutorial,created_at) VALUES (" +
+      [u.id, u.name, u.username, u.email, u.password, u.role, u.department, u.avatarUrl, u.bio,
+        u.isFirstTime ? 1 : 0, u.hasCompletedTutorial ? 1 : 0,
+        u.createdAt ? u.createdAt.substring(0, 19).replace("T", " ") : null].map((v) => typeof v === "number" ? String(v) : escapeSql(v)).join(",") +
+      ");");
+  }
+  lines.push("");
 
-`;
+  lines.push("CREATE TABLE systems_under_study (" +
+    "id varchar(64) NOT NULL, name varchar(255) NOT NULL, system_type varchar(128) NOT NULL, description text, " +
+    "lifecycle_state varchar(32) NOT NULL, target_roles json DEFAULT NULL, created_at datetime DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (id)" +
+    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  lines.push("");
 
-  usersDb.forEach((u) => {
-    sql += `INSERT INTO \`users\` (\`id\`, \`name\`, \`username\`, \`email\`, \`password_hash\`, \`role\`, \`department\`, \`avatar_url\`, \`bio\`, \`is_first_time\`, \`has_completed_tutorial\`, \`created_at\`) VALUES (
-  ${escapeSql(u.id)},
-  ${escapeSql(u.name)},
-  ${escapeSql(u.username)},
-  ${escapeSql(u.email)},
-  ${escapeSql(u.password)},
-  ${escapeSql(u.role)},
-  ${escapeSql(u.department)},
-  ${escapeSql(u.avatarUrl)},
-  ${escapeSql(u.bio)},
-  ${u.isFirstTime ? 1 : 0},
-  ${u.hasCompletedTutorial ? 1 : 0},
-  ${escapeSql(u.createdAt.substring(0, 19).replace("T", " "))}
-);\n`;
-  });
+  for (const s of systemsDb) {
+    lines.push("INSERT INTO systems_under_study (id,name,system_type,description,lifecycle_state,target_roles,created_at) VALUES (" +
+      [s.id, s.name, s.type, s.description, s.lifecycleState, JSON.stringify(s.targetRoles),
+        s.createdAt ? s.createdAt.substring(0, 19).replace("T", " ") : null].map(escapeSql).join(",") +
+      ");");
+  }
+  lines.push("");
 
-  sql += `\n-- --------------------------------------------------------
--- Table: \`systems_under_study\`
--- --------------------------------------------------------
-DROP TABLE IF EXISTS \`systems_under_study\`;
-CREATE TABLE \`systems_under_study\` (
-  \`id\` varchar(64) NOT NULL,
-  \`name\` varchar(255) NOT NULL,
-  \`system_type\` varchar(128) NOT NULL,
-  \`description\` text,
-  \`lifecycle_state\` enum('existing','proposed','modernization') NOT NULL,
-  \`target_roles\` json DEFAULT NULL,
-  \`created_at\` datetime DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (\`id\`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  lines.push("CREATE TABLE interviews (" +
+    "id varchar(64) NOT NULL, system_id varchar(64) NOT NULL, system_name varchar(255) NOT NULL, " +
+    "interviewer_name varchar(128) NOT NULL, interviewer_role varchar(128), interviewer_dept varchar(128), " +
+    "interviewee_name varchar(128) NOT NULL, interviewee_role varchar(128) NOT NULL, interviewee_email varchar(191), " +
+    "interviewee_dept varchar(128), share_token varchar(128) NOT NULL UNIQUE, status varchar(32) DEFAULT 'in_progress', " +
+    "summary_report json DEFAULT NULL, created_at datetime DEFAULT CURRENT_TIMESTAMP, completed_at datetime DEFAULT NULL, PRIMARY KEY (id)" +
+    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  lines.push("");
 
-`;
+  for (const i of interviewsDb) {
+    lines.push("INSERT INTO interviews (id,system_id,system_name,interviewer_name,interviewer_role,interviewer_dept,interviewee_name,interviewee_role,interviewee_email,interviewee_dept,share_token,status,summary_report,created_at,completed_at) VALUES (" +
+      [i.id, i.systemId, i.systemName, i.interviewerName, i.interviewerRole, i.interviewerDept,
+        i.intervieweeName, i.intervieweeRole, i.intervieweeEmail, i.intervieweeDept, i.shareToken, i.status,
+        i.summaryReport ? JSON.stringify(i.summaryReport) : null,
+        i.createdAt ? i.createdAt.substring(0, 19).replace("T", " ") : null,
+        i.completedAt ? i.completedAt.substring(0, 19).replace("T", " ") : null].map(escapeSql).join(",") +
+      ");");
+  }
+  lines.push("");
 
-  systemsDb.forEach((s) => {
-    sql += `INSERT INTO \`systems_under_study\` (\`id\`, \`name\`, \`system_type\`, \`description\`, \`lifecycle_state\`, \`target_roles\`, \`created_at`) VALUES (
-  ${escapeSql(s.id)},
-  ${escapeSql(s.name)},
-  ${escapeSql(s.type)},
-  ${escapeSql(s.description)},
-  ${escapeSql(s.lifecycleState)},
-  ${escapeSql(JSON.stringify(s.targetRoles))},
-  ${escapeSql(s.createdAt.substring(0, 19).replace("T", " "))}
-);\n`;
-  });
+  lines.push("CREATE TABLE interview_responses (" +
+    "id varchar(64) NOT NULL, interview_id varchar(64) NOT NULL, question_id varchar(64) NOT NULL, " +
+    "question_text text NOT NULL, category varchar(64) NOT NULL, response_text longtext, audio_duration_seconds int DEFAULT 0, " +
+    "ai_transcript longtext, ai_confidence int DEFAULT 95, sentiment varchar(32) DEFAULT 'constructive', sentiment_score int DEFAULT 75, " +
+    "key_requirements json DEFAULT NULL, ai_model varchar(64) DEFAULT NULL, created_at datetime DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (id)" +
+    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+  lines.push("");
 
-  sql += `\n-- --------------------------------------------------------
--- Table: \`interviews\`
--- --------------------------------------------------------
-DROP TABLE IF EXISTS \`interviews\`;
-CREATE TABLE \`interviews\` (
-  \`id\` varchar(64) NOT NULL,
-  \`system_id\` varchar(64) NOT NULL,
-  \`system_name\` varchar(255) NOT NULL,
-  \`interviewer_name\` varchar(128) NOT NULL,
-  \`interviewer_role\` varchar(128) DEFAULT NULL,
-  \`interviewer_dept\` varchar(128) DEFAULT NULL,
-  \`interviewee_name\` varchar(128) NOT NULL,
-  \`interviewee_role\` varchar(128) NOT NULL,
-  \`interviewee_email\` varchar(191) DEFAULT NULL,
-  \`interviewee_dept\` varchar(128) DEFAULT NULL,
-  \`share_token\` varchar(128) NOT NULL UNIQUE,
-  \`status\` enum('scheduled','in_progress','completed') DEFAULT 'in_progress',
-  \`summary_report\` json DEFAULT NULL,
-  \`created_at\` datetime DEFAULT CURRENT_TIMESTAMP,
-  \`completed_at\` datetime DEFAULT NULL,
-  PRIMARY KEY (\`id\`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  for (const i of interviewsDb) {
+    for (const r of Object.values(i.responses) as any[]) {
+      const ai = r.aiTranscript;
+      lines.push("INSERT INTO interview_responses (id,interview_id,question_id,question_text,category,response_text,audio_duration_seconds,ai_transcript,ai_confidence,sentiment,sentiment_score,key_requirements,ai_model,created_at) VALUES (" +
+        [r.id, r.interviewId, r.questionId, r.questionText, r.category, r.responseText,
+          r.audioDurationSeconds || 0, ai?.transcript || r.responseText, ai?.confidence || 95,
+          ai?.sentiment || "constructive", ai?.sentimentScore || 75,
+          ai?.keyRequirements ? JSON.stringify(ai.keyRequirements) : null,
+          ai?.modelUsed || null, r.createdAt ? r.createdAt.substring(0, 19).replace("T", " ") : null]
+          .map((v) => typeof v === "number" ? String(v) : escapeSql(v)).join(",") + ");");
+    }
+  }
 
-`;
+  lines.push("");
+  lines.push("SET FOREIGN_KEY_CHECKS = 1;");
+  lines.push("COMMIT;");
+  lines.push("-- Export complete.");
 
-  interviewsDb.forEach((i) => {
-    sql += `INSERT INTO \`interviews\` (\`id\`, \`system_id\`, \`system_name\`, \`interviewer_name\`, \`interviewer_role\`, \`interviewer_dept\`, \`interviewee_name\`, \`interviewee_role\`, \`interviewee_email\`, \`interviewee_dept\`, \`share_token\`, \`status\`, \`summary_report\`, \`created_at\`, \`completed_at`) VALUES (
-  ${escapeSql(i.id)},
-  ${escapeSql(i.systemId)},
-  ${escapeSql(i.systemName)},
-  ${escapeSql(i.interviewerName)},
-  ${escapeSql(i.interviewerRole)},
-  ${escapeSql(i.interviewerDept)},
-  ${escapeSql(i.intervieweeName)},
-  ${escapeSql(i.intervieweeRole)},
-  ${escapeSql(i.intervieweeEmail)},
-  ${escapeSql(i.intervieweeDept)},
-  ${escapeSql(i.shareToken)},
-  ${escapeSql(i.status)},
-  ${i.summaryReport ? escapeSql(JSON.stringify(i.summaryReport)) : "NULL"},
-  ${escapeSql(i.createdAt.substring(0, 19).replace("T", " "))},
-  ${i.completedAt ? escapeSql(i.completedAt.substring(0, 19).replace("T", " ")) : "NULL"}
-);\n`;
-  });
-
-  sql += `\n-- --------------------------------------------------------
--- Table: \`interview_responses\`
--- --------------------------------------------------------
-DROP TABLE IF EXISTS \`interview_responses\`;
-CREATE TABLE \`interview_responses\` (
-  \`id\` varchar(64) NOT NULL,
-  \`interview_id\` varchar(64) NOT NULL,
-  \`question_id\` varchar(64) NOT NULL,
-  \`question_text\` text NOT NULL,
-  \`category\` varchar(64) NOT NULL,
-  \`response_text\` longtext,
-  \`audio_duration_seconds\` int DEFAULT 0,
-  \`ai_transcript\` longtext,
-  \`ai_confidence\` int DEFAULT 95,
-  \`sentiment\` enum('positive','constructive','neutral','negative') DEFAULT 'constructive',
-  \`sentiment_score\` int DEFAULT 75,
-  \`key_requirements\` json DEFAULT NULL,
-  \`ai_model\` varchar(64) DEFAULT NULL,
-  \`created_at\` datetime DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (\`id\`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-`;
-
-  interviewsDb.forEach((i) => {
-    Object.values(i.responses).forEach((r: any) => {
-      sql += `INSERT INTO \`interview_responses\` (\`id\`, \`interview_id\`, \`question_id\`, \`question_text\`, \`category\`, \`response_text\`, \`audio_duration_seconds\`, \`ai_transcript\`, \`ai_confidence\`, \`sentiment\`, \`sentiment_score\`, \`key_requirements\`, \`ai_model\`, \`created_at`) VALUES (
-  ${escapeSql(r.id)},
-  ${escapeSql(r.interviewId)},
-  ${escapeSql(r.questionId)},
-  ${escapeSql(r.questionText)},
-  ${escapeSql(r.category)},
-  ${escapeSql(r.responseText)},
-  ${r.audioDurationSeconds || 0},
-  ${escapeSql(r.aiTranscript?.transcript || r.responseText)},
-  ${r.aiTranscript?.confidence || 95},
-  ${escapeSql(r.aiTranscript?.sentiment || "constructive")},
-  ${r.aiTranscript?.sentimentScore || 75},
-  ${r.aiTranscript?.keyRequirements ? escapeSql(JSON.stringify(r.aiTranscript.keyRequirements)) : "NULL"},
-  ${escapeSql(r.aiTranscript?.modelUsed || "gemini-3.8-flash")},
-  ${escapeSql((r.createdAt || new Date().toISOString()).substring(0, 19).replace("T", " "))}
-);\n`;
-    });
-  });
-
-  sql += `\nSET FOREIGN_KEY_CHECKS = 1;
-COMMIT;
--- Export complete.
-`;
-
-  res.setHeader("Content-Disposition", 'attachment; filename="reqvoice_mysql_dump.sql"');
+  res.setHeader("Content-Disposition", "attachment; filename=reqvoice_mysql_dump.sql");
   res.setHeader("Content-Type", "application/sql; charset=utf-8");
-  res.send(sql);
+  res.send(lines.join("\n"));
 });
 
 // Single-File Consolidated Markdown/HTML Report of All Records
