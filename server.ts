@@ -1336,6 +1336,118 @@ app.post("/api/interviews/:id/response", async (req: Request, res: Response) => 
   res.json({ success: true, response: responseObj });
 });
 
+app.post("/api/interviews/analytics/ai", async (req: Request, res: Response) => {
+  const user = getAuthUser(req);
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const { systemId } = req.body || {};
+  if (!systemId || typeof systemId !== "string") {
+    res.status(400).json({ error: "systemId is required." });
+    return;
+  }
+
+  try {
+    const sourceInterviews = (supabase
+      ? await getRemoteInterviewsForUser(user.id)
+      : interviewsDb.filter((i) => i.userId === user.id)
+    ).filter((i) => i.systemId === systemId && i.status === "completed");
+
+    if (sourceInterviews.length === 0) {
+      res.status(404).json({ error: "No completed interviews are available for this system yet." });
+      return;
+    }
+
+    const systemName = sourceInterviews[0].systemName;
+    const evidence = sourceInterviews.flatMap((inv) =>
+      Object.values(inv.responses || {}).map((r: any) => ({
+        interviewId: inv.id,
+        interviewee: inv.intervieweeName || "Anonymous",
+        role: inv.intervieweeRole || "Stakeholder",
+        questionId: r.questionId,
+        question: r.questionText,
+        category: r.category,
+        answer: (r.aiTranscript?.transcript || r.responseText || "").trim(),
+        sentiment: r.aiTranscript?.sentiment || null,
+        sentimentScore: typeof r.aiTranscript?.sentimentScore === "number" ? r.aiTranscript.sentimentScore : null,
+        keyRequirements: r.aiTranscript?.keyRequirements || [],
+      })).filter((r) => r.answer.length > 0)
+    );
+
+    if (evidence.length === 0) {
+      res.status(422).json({ error: "The completed interviews do not contain analyzable answers yet." });
+      return;
+    }
+
+    const counts = {
+      interviews: sourceInterviews.length,
+      responses: evidence.length,
+      positive: evidence.filter((e) => e.sentiment === "positive").length,
+      neutral: evidence.filter((e) => e.sentiment === "neutral").length,
+      negative: evidence.filter((e) => e.sentiment === "negative").length,
+      constructive: evidence.filter((e) => e.sentiment === "constructive").length,
+    };
+
+    const ai = getGeminiClient();
+    if (!ai) {
+      res.status(503).json({ error: "AI analysis is not configured. Add the Gemini API key on the server.", retryable: false });
+      return;
+    }
+
+    const prompt = `You are an expert requirements analyst. Analyze ONLY the supplied interview evidence for the system under study: "${systemName}".
+Do not invent facts, counts, quotes, interviewees, or recommendations. Every theme must be supported by one or more supplied evidence IDs. Treat AI-generated sentiment labels as signals, not ground truth.
+
+Evidence:
+${evidence.map((e, idx) => `E${idx + 1} | Interviewee: ${e.interviewee} | Role: ${e.role} | Category: ${e.category} | Question: ${e.question} | Answer: ${e.answer} | Sentiment: ${e.sentiment ?? "unknown"} | Requirements: ${e.keyRequirements.join("; ")}`).join("\n")}
+
+Return ONLY JSON:
+{
+  "executiveSummary": "3-5 concise sentences grounded in the evidence.",
+  "keyFindings": [{"finding":"...", "mentionCount":1, "evidenceIds":["E1"]}],
+  "themes": [{"name":"...", "description":"...", "mentionCount":1, "evidenceIds":["E1","E2"]}],
+  "commonIssues": [{"issue":"...", "mentionCount":1, "evidenceIds":["E1"]}],
+  "commonSuggestions": [{"suggestion":"...", "mentionCount":1, "evidenceIds":["E1"]}],
+  "requirements": [{"requirement":"...", "priority":"High|Medium|Low", "rationale":"...", "evidenceIds":["E1"]}],
+  "questionInsights": [{"question":"...", "responseCount":1, "summary":"...", "evidenceIds":["E1"]}],
+  "sentiment": {"positive":0,"neutral":0,"negative":0,"constructive":0},
+  "limitations": ["Missing answer coverage, ambiguity, or other evidence limitation."]
+}`;
+
+    const aiRes = await ai.models.generateContent({
+      model: process.env.GEMINI_QUESTION_MODEL || "gemini-2.5-flash",
+      contents: prompt,
+      config: { responseMimeType: "application/json" },
+    });
+
+    const parsed = JSON.parse(aiRes.text || "{}");
+    const validEvidence = new Set(evidence.map((_, i) => `E${i + 1}`));
+    const cleanEvidenceIds = (ids: any) => Array.isArray(ids) ? ids.filter((id) => validEvidence.has(id)) : [];
+    const cleanList = (items: any[]) => Array.isArray(items) ? items.map((x: any) => ({ ...x, evidenceIds: cleanEvidenceIds(x?.evidenceIds) })).filter((x: any) => x && typeof x === "object") : [];
+
+    res.json({
+      systemId,
+      systemName,
+      generatedAt: new Date().toISOString(),
+      sourceCounts: counts,
+      executiveSummary: parsed.executiveSummary || "The available interview evidence has been summarized below.",
+      keyFindings: cleanList(parsed.keyFindings),
+      themes: cleanList(parsed.themes),
+      commonIssues: cleanList(parsed.commonIssues),
+      commonSuggestions: cleanList(parsed.commonSuggestions),
+      requirements: cleanList(parsed.requirements),
+      questionInsights: cleanList(parsed.questionInsights),
+      sentiment: parsed.sentiment || counts,
+      limitations: Array.isArray(parsed.limitations) ? parsed.limitations.slice(0, 8) : [],
+      evidence: evidence.map((e, i) => ({ id: `E${i + 1}`, interviewId: e.interviewId, interviewee: e.interviewee, role: e.role, questionId: e.questionId, question: e.question, answer: e.answer })),
+    });
+  } catch (error: any) {
+    console.error("[AI ANALYTICS] Failed:", error);
+    res.status(500).json({ error: "AI analytics could not be generated.", detail: error?.message || "Unknown error", retryable: true });
+  }
+});
+
 app.post("/api/interviews/:id/finish", async (req: Request, res: Response) => {
   const interview = interviewsDb.find((i) => i.id === req.params.id);
   if (!interview) {
