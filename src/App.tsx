@@ -291,7 +291,7 @@ export function App() {
             )
           )}
 
-          {activeTab === 'analytics' && <AnalyticsView interviews={interviews} />}
+          {activeTab === 'analytics' && <AnalyticsView interviews={interviews} systems={systems} selectedInterviewId={selectedInterviewId} />}
 
           {activeTab === 'reports' && (
             <ReportsView
