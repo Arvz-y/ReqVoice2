@@ -3181,7 +3181,7 @@ CREATE TABLE \`users\` (
 `;
 
   usersDb.forEach((u) => {
-    sql += `INSERT INTO \`users\` (\`id\`, \`name\`, \`username\`, \`email\`, \`password_hash\`, \`role\`, \`department\`, \`avatar_url\`, \`bio\`, \`is_first_time\`, \`has_completed_tutorial\`, \`created_at`) VALUES (
+    sql += `INSERT INTO \`users\` (\`id\`, \`name\`, \`username\`, \`email\`, \`password_hash\`, \`role\`, \`department\`, \`avatar_url\`, \`bio\`, \`is_first_time\`, \`has_completed_tutorial\`, \`created_at\`) VALUES (
   ${escapeSql(u.id)},
   ${escapeSql(u.name)},
   ${escapeSql(u.username)},
