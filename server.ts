@@ -838,7 +838,12 @@ app.post("/api/interviews/:id/response", async (req: Request, res: Response) => 
       delete videoRecording.base64Data;
       } catch (err) {
         console.warn("Could not save video recording:", err);
-        res.status(500).json({ error: "The video recording could not be saved. No response was stored." });
+        const message = err instanceof Error ? err.message : "Unknown media storage error";
+      res.status(422).json({
+        code: "VIDEO_STORAGE_FAILED",
+        error: "The video recording could not be saved. " + message,
+        retryable: false,
+      });
         return;
       }
     }
@@ -1056,7 +1061,9 @@ app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
     try {
       const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64,/, "");
       const videoBuffer = Buffer.from(cleanBase64, "base64");
-      if (!videoBuffer.length) throw new Error("Empty video payload");
+      if (videoBuffer.length < 1024) {
+        throw new Error("Video payload is incomplete (" + videoBuffer.length + " bytes received)");
+      }
       const mimeType = videoRecording.mimeType || "video/webm";
       const extension = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
       videosStore.set(videoRecording.id, {
