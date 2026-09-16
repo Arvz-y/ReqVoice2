@@ -1145,6 +1145,7 @@ Format as JSON array of objects:
       const modelCandidates = [
         process.env.GEMINI_QUESTION_MODEL,
         "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
         "gemini-2.0-flash",
         "gemini-2.0-flash-001",
         "gemini-2.5-pro",
@@ -1152,8 +1153,16 @@ Format as JSON array of objects:
       let response: any;
       let lastModelError: any;
 
-      // Primary path: official @google/genai SDK.
-      for (const modelName of modelCandidates) {
+      // Primary path: direct Gemini REST API. This avoids hosted-runtime SDK
+      // compatibility problems and gives us the actual Gemini HTTP error.
+      const apiKey =
+        process.env.GEMINI_API_KEY ||
+        process.env.GOOGLE_API_KEY ||
+        process.env.GOOGLE_GENAI_API_KEY ||
+        process.env.API_KEY;
+
+      if (apiKey) {
+        for (const modelName of modelCandidates) {
         try {
           response = await ai.models.generateContent({
             model: modelName,
@@ -1171,17 +1180,9 @@ Format as JSON array of objects:
         }
       }
 
-      // Secondary path: direct Gemini REST API. This makes question generation
-      // resilient to SDK/model compatibility issues on hosted environments such as Render.
-      if (!response?.text) {
-        const apiKey =
-          process.env.GEMINI_API_KEY ||
-          process.env.GOOGLE_API_KEY ||
-          process.env.GOOGLE_GENAI_API_KEY ||
-          process.env.API_KEY;
-
-        if (apiKey) {
-          for (const modelName of modelCandidates) {
+      // Secondary path: official @google/genai SDK.
+      if (!response?.text && ai) {
+        for (const modelName of modelCandidates) {
             try {
               const restResponse = await fetch(
                 `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`,
