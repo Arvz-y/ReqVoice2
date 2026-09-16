@@ -148,6 +148,90 @@ function getGeminiClient(): GoogleGenAI | null {
   return geminiClient;
 }
 
+
+type GeminiGenerationOptions = {
+  contents: any;
+  config?: any;
+};
+
+function isGeminiModelUnavailableError(err: any): boolean {
+  const message = String(err?.message || err?.error?.message || err || "");
+  return /(?:404|400|403|NOT_FOUND|INVALID_ARGUMENT|UNAVAILABLE|not found|not supported|unsupported|deprecated|shut down|model.*(unavailable|invalid)|resource.*exhausted|quota|rate.?limit)/i.test(message);
+}
+
+async function listAvailableGeminiGenerateModels(ai: GoogleGenAI): Promise<string[]> {
+  const available: string[] = [];
+  try {
+    const pager: any = await ai.models.list({ config: { pageSize: 100 } } as any);
+    const items = pager?.items || pager?.models || [];
+    for (const m of items) {
+      const name = String(m?.name || m?.baseModelId || m?.model || "").replace(/^models\//, "");
+      const actions = Array.isArray(m?.supportedActions) ? m.supportedActions : [];
+      if (name && (!actions.length || actions.includes("generateContent"))) available.push(name);
+    }
+    let page = pager;
+    while (page?.nextPageToken) {
+      page = await ai.models.list({ config: { pageSize: 100, pageToken: page.nextPageToken } } as any);
+      for (const m of (page?.items || page?.models || [])) {
+        const name = String(m?.name || m?.baseModelId || m?.model || "").replace(/^models\//, "");
+        const actions = Array.isArray(m?.supportedActions) ? m.supportedActions : [];
+        if (name && (!actions.length || actions.includes("generateContent"))) available.push(name);
+      }
+    }
+  } catch (err: any) {
+    console.warn("[AI MODEL DISCOVERY] Unable to list Gemini models:", err?.message || err);
+  }
+  return [...new Set(available)];
+}
+
+async function generateWithAvailableGeminiModel(
+  ai: GoogleGenAI,
+  requestedModel: string | undefined,
+  options: GeminiGenerationOptions,
+  preferredModels: string[] = []
+): Promise<{ response: any; modelUsed: string }> {
+  const first = [...new Set([requestedModel?.trim(), ...preferredModels].filter(Boolean) as string[])];
+  let lastError: any = null;
+
+  // Always try the configured/current model first.
+  for (const model of first) {
+    try {
+      const response = await ai.models.generateContent({ model, ...options });
+      if (response?.text?.trim() || response) return { response, modelUsed: model };
+    } catch (err: any) {
+      lastError = err;
+      if (!isGeminiModelUnavailableError(err)) throw err;
+      console.warn("[AI MODEL FALLBACK] Model unavailable:", model, "— discovering available models now.");
+      break;
+    }
+  }
+
+  // The moment the configured/current model is unavailable, discover what the API
+  // actually exposes for this API key instead of relying on stale hard-coded names.
+  const discovered = await listAvailableGeminiGenerateModels(ai);
+  const ranked = [
+    ...discovered.filter(m => /flash-lite/i.test(m)),
+    ...discovered.filter(m => /flash/i.test(m) && !/flash-lite/i.test(m)),
+    ...discovered.filter(m => /pro/i.test(m)),
+    ...discovered,
+  ];
+  for (const model of [...new Set(ranked)]) {
+    if (first.includes(model)) continue;
+    try {
+      const response = await ai.models.generateContent({ model, ...options });
+      if (response?.text?.trim() || response) {
+        console.log("[AI MODEL FALLBACK] Using discovered available model:", model);
+        return { response, modelUsed: model };
+      }
+    } catch (err: any) {
+      lastError = err;
+      console.warn("[AI MODEL FALLBACK] Discovered model failed:", model, err?.message || err);
+    }
+  }
+
+  throw lastError || new Error("No available Gemini generateContent model was found for this API key.");
+}
+
 // In-memory Database with rich seed data for Requirements Gathering
 interface StoredSystem {
   id: string;
@@ -1696,33 +1780,19 @@ Return ONLY JSON:
   "limitations": ["Missing answer coverage, ambiguity, or other evidence limitation."]
 }`;
 
-    // Use a small fallback chain so AI analytics does not fail just because
-    // the Render environment has an unavailable/limited Gemini model configured.
-    const requestedModel = process.env.GEMINI_ANALYTICS_MODEL?.trim() || process.env.GEMINI_QUESTION_MODEL?.trim();
-    const models = [
-      requestedModel,
-      "gemini-2.5-flash",
-      "gemini-2.0-flash",
-      "gemini-2.0-flash-001",
-      "gemini-2.5-flash-lite",
-    ].filter((m, i, arr): m is string => !!m && arr.indexOf(m) === i);
-
     let aiText = "";
     let lastAIError = "";
-    for (const model of models) {
-      try {
-        const aiRes = await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config: { responseMimeType: "application/json" },
-        });
-        aiText = aiRes.text || "";
-        if (aiText.trim()) break;
-        lastAIError = model + ": Gemini returned an empty response.";
-      } catch (err: any) {
-        lastAIError = model + ": " + (err?.message || "request failed");
-        console.warn("[AI ANALYTICS] Gemini model failed:", lastAIError);
-      }
+    try {
+      const result = await generateWithAvailableGeminiModel(
+        ai,
+        process.env.GEMINI_ANALYTICS_MODEL?.trim() || process.env.GEMINI_QUESTION_MODEL?.trim(),
+        { contents: prompt, config: { responseMimeType: "application/json" } },
+        ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
+      );
+      aiText = result.response.text || "";
+    } catch (err: any) {
+      lastAIError = err?.message || String(err);
+      console.warn("[AI ANALYTICS] All Gemini models failed:", lastAIError);
     }
 
     if (!aiText.trim()) {
@@ -2645,13 +2715,13 @@ Analyze the spoken response and return a JSON object with:
         ],
       };
 
-      const response = await ai.models.generateContent({
-        model: process.env.GEMINI_TRANSCRIPTION_MODEL || process.env.GEMINI_QUESTION_MODEL || "gemini-3.5-flash-lite",
-        contents,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
+      const generation = await generateWithAvailableGeminiModel(
+        ai,
+        process.env.GEMINI_TRANSCRIPTION_MODEL || process.env.GEMINI_QUESTION_MODEL || "gemini-3.5-flash-lite",
+        { contents, config: { responseMimeType: "application/json" } },
+        ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.7-flash"]
+      );
+      const response = generation.response;
 
       const parsed = JSON.parse(response.text || "{}");
       if (parsed.transcript) {
@@ -2661,7 +2731,7 @@ Analyze the spoken response and return a JSON object with:
           sentiment: parsed.sentiment || "constructive",
           sentimentScore: parsed.sentimentScore || 85,
           keyRequirements: parsed.keyRequirements || ["High availability", "Ergonomic user experience"],
-          modelUsed: "gemini-3.8-flash",
+          modelUsed: generation.modelUsed,
           generatedAt: new Date().toISOString(),
         });
         return;
@@ -2797,61 +2867,19 @@ Format as JSON array of objects:
   }
 ]`;
 
-      // Use currently supported stable text-generation models first.
-      // Do not let an old/unsupported Render GEMINI_QUESTION_MODEL value
-      // override the working Flash models.
-      // Gemini has reported the currently available models for this API key.
-      // Keep an optional custom model as a fallback, but never use retired models.
-      const requestedModel = process.env.GEMINI_QUESTION_MODEL?.trim();
-      // Prefer current stable Flash models. Keep multiple providers/models in the
-      // fallback chain because Gemini quota can be model-specific.
-      const modelCandidates = [
-        "gemini-3.5-flash-lite",
-        "gemini-3.7-flash",
-        "gemini-3.8-flash",
-        "gemini-3.6-flash",
-        ...(requestedModel &&
-        ![
-          "gemini-2.5-pro",
-          "gemini-2.5-flash",
-          "gemini-2.5-flash-lite",
-          "gemini-2.0-flash",
-          "gemini-2.0-flash-001",
-          "gemini-3.5-flash",
-          "gemini-3.5-flash-lite",
-          "gemini-3.6-flash",
-          "gemini-3.7-flash",
-          "gemini-3.8-flash",
-        ].includes(requestedModel)
-          ? [requestedModel]
-          : []),
-      ].filter((model, index, all) => all.indexOf(model) === index);
-
       let response: any = null;
-
-      // Try each supported model independently. A temporary 503 from one model
-      // must not prevent the next available model from generating the questions.
-      for (const model of modelCandidates) {
-        try {
-          const candidateResponse = await ai.models.generateContent({
-            model,
-            contents: systemInstruction,
-          });
-          if (candidateResponse?.text?.trim()) {
-            response = candidateResponse;
-            console.log("Gemini question generation succeeded:", model);
-            break;
-          }
-          throw new Error("Gemini returned an empty response.");
-        } catch (err: any) {
-          const message =
-            err?.message ||
-            err?.error?.message ||
-            (typeof err === "string" ? err : JSON.stringify(err));
-          lastModelError = err instanceof Error ? err : new Error(message);
-          modelErrors.push(`${model}: ${message}`);
-          console.warn("Gemini question model failed:", model, message);
-        }
+      try {
+        const generation = await generateWithAvailableGeminiModel(
+          ai,
+          process.env.GEMINI_QUESTION_MODEL?.trim(),
+          { contents: systemInstruction },
+          ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+        );
+        response = generation.response;
+        console.log("Gemini question generation succeeded:", generation.modelUsed);
+      } catch (err: any) {
+        lastModelError = err instanceof Error ? err : new Error(err?.message || String(err));
+        modelErrors.push(lastModelError.message);
       }
 
       if (!response?.text) {
@@ -3129,13 +3157,13 @@ Return ONLY a valid JSON object matching this exact schema:
   "urgency": "High" | "Medium" | "Low"
 }`;
 
-      const response = await ai.models.generateContent({
-        model: process.env.GEMINI_QUESTION_MODEL || "gemini-2.5-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
+      const generation = await generateWithAvailableGeminiModel(
+        ai,
+        process.env.GEMINI_QUESTION_MODEL || "gemini-2.5-flash",
+        { contents: prompt, config: { responseMimeType: "application/json" } },
+        ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.7-flash"]
+      );
+      const response = generation.response;
 
       const parsed = JSON.parse(response.text || "{}");
       if (parsed.sentiment) {
@@ -3611,10 +3639,6 @@ Platform State Knowledge:
 
     // If Gemini client is available and API key is present
     if (ai) {
-      // Only advertise/use models supported by the current Gemini configuration.
-      const validModels = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.6-pro"];
-      const selectedModel = validModels.includes(model) ? model : "gemini-3.6-flash";
-
       // Format conversation turns
       const contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
 
@@ -3635,20 +3659,25 @@ Platform State Knowledge:
         parts: [{ text: message.trim() }],
       });
 
-      const response = await ai.models.generateContent({
-        model: selectedModel,
-        contents,
-        config: {
-          systemInstruction: domainKnowledge + `
+      const generation = await generateWithAvailableGeminiModel(
+        ai,
+        model,
+        {
+          contents,
+          config: {
+            systemInstruction: domainKnowledge + `
 Be precise, structured, and insightful. When asked for requirements, format them cleanly using IEEE 830 / ISO 29148 standards (e.g. Functional, Non-Functional, Interface, Performance, and Security requirements with prioritization MoSCoW: Must/Should/Could/Won't). Always cite stakeholder evidence when available.`,
-          temperature: 0.3,
+            temperature: 0.3,
+          },
         },
-      });
+        ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.7-flash"]
+      );
+      const response = generation.response;
 
       const replyText = response.text || "I have analyzed your request based on the systems requirements database.";
       res.json({
         reply: replyText,
-        modelUsed: selectedModel,
+        modelUsed: generation.modelUsed,
         timestamp: new Date().toISOString(),
       });
       return;
