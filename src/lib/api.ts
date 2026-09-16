@@ -263,7 +263,8 @@ export const api = {
             response = await fetch('/api/share/' + token + '/video', {
               method: 'POST',
               headers: {
-                'Content-Type': blob.type || 'application/octet-stream',
+                'Content-Type': 'application/octet-stream',
+                'X-Video-Mime-Type': blob.type || 'application/octet-stream',
                 'X-Question-ID': questionId,
                 'X-Video-ID': videoId,
                 'X-Duration-Seconds': String(durationSeconds || 0),
