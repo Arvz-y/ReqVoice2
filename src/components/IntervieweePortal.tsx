@@ -63,6 +63,8 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [recordingPlayable, setRecordingPlayable] = useState(false);
+  const [testingRecording, setTestingRecording] = useState(false);
 
   // Video recording output for current question
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
@@ -305,6 +307,8 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
 
         setRecordingSeconds(finalDuration);
         setRecordedBlob(completeBlob);
+        setRecordingPlayable(false);
+        setTestingRecording(true);
 
         const videoUrl = URL.createObjectURL(completeBlob);
         setRecordedVideoUrl(videoUrl);
@@ -335,14 +339,16 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
           }
           probe.removeAttribute('src');
           probe.load();
+          setRecordingPlayable(true);
+          setCameraError(null);
         } catch (validationError: any) {
-          // Do not discard a non-empty recording just because the current browser
-          // cannot preview its codec. The server validates the container and can
-          // transcode WebM/Ogg to H.264/AAC MP4 for delivery.
-          console.warn('Recorded media preview validation failed; keeping recording for server delivery:', validationError);
+          console.warn('Recorded media failed browser playability validation:', validationError);
+          setRecordingPlayable(false);
           setCameraError(
-            'Preview is unavailable in this browser, but the recording is still available and can be submitted. The server will prepare a compatible playback copy.'
+            'This recording cannot be previewed or verified by your browser. It has NOT been submitted. Please use Re-Record and try again.'
           );
+        } finally {
+          setTestingRecording(false);
         }
 
         // Store video in local IndexedDB and record ID for cleanup on re-record
@@ -434,6 +440,8 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
 
     setRecordedBlob(null);
     setRecordedVideoUrl(null);
+    setRecordingPlayable(false);
+    setTestingRecording(false);
     setCompressionMetrics(null);
     setRecordingSeconds(0);
     setLiveTranscript('');
@@ -552,6 +560,10 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
 
     const hasTyped = typedResponse.trim().length > 0;
     const hasRecorded = !!recordedBlob;
+    if (hasRecorded && !recordingPlayable) {
+      alert('Submission blocked: the temporary recording did not pass the playability check. Please re-record the answer.');
+      return;
+    }
     if (!hasTyped && !hasRecorded) {
       alert('Please either type an answer or record a video/audio response before submitting.');
       return;
@@ -1169,7 +1181,7 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
               <div className="pt-3 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="text-xs text-slate-400">
                   {recordedBlob
-                    ? '✓ Video recorded and compressed'
+                    ? (testingRecording ? 'Checking recorded video...' : recordingPlayable ? '✓ Recording verified and ready to submit' : '⚠ Recording failed playability check — re-record')
                     : typedResponse.trim()
                     ? '✓ Written answer ready'
                     : 'Record video/audio or type answer'}
@@ -1178,7 +1190,7 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
                 <button
                   type="button"
                   onClick={handleSubmitAnswer}
-                  disabled={isSubmitting || (!recordedBlob && !typedResponse.trim())}
+                  disabled={isSubmitting || testingRecording || (!!recordedBlob && !recordingPlayable) || (!recordedBlob && !typedResponse.trim())}
                   className="flex items-center justify-center space-x-2 px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/30 transition-all disabled:opacity-50 cursor-pointer w-full sm:w-auto"
                 >
                   {isSubmitting ? (
