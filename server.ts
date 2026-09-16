@@ -679,6 +679,19 @@ async function loadUsersFromSupabase(): Promise<void> {
   console.log(`Loaded ${usersDb.length} persistent account(s).`);
 }
 
+async function loadSystemsFromSupabase(): Promise<void> {
+  if (!supabase) return;
+  const { data, error } = await supabase.from("app_systems").select("*").order("created_at", { ascending: true });
+  if (error) throw new Error("Supabase system load failed: " + error.message);
+  systemsDb = (data || []).map((s: any) => ({ id: s.id, userId: s.user_id, name: s.name, type: s.type, description: s.description || "", lifecycleState: s.lifecycle_state, targetRoles: Array.isArray(s.target_roles) ? s.target_roles : [], createdAt: s.created_at }));
+  console.log(`Loaded ${systemsDb.length} persistent system workspace(s).`);
+}
+async function persistSystemRemotely(system: StoredSystem): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.from("app_systems").upsert({ id: system.id, user_id: system.userId, name: system.name, type: system.type, description: system.description, lifecycle_state: system.lifecycleState, target_roles: system.targetRoles, created_at: system.createdAt }, { onConflict: "id" });
+  if (error) throw new Error("Supabase system save failed: " + error.message);
+}
+
 // Signed tokens remain valid after Render restarts; the in-memory map is only a fast path.
 const activeSessions = new Map<string, StoredUser>();
 function getAuthUser(req: Request): StoredUser | null {
@@ -788,6 +801,7 @@ app.post("/api/auth/register", (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   };
   systemsDb.unshift(initialSystem);
+  if (supabase) await persistSystemRemotely(initialSystem);
 
   // Initialize first activity record for this isolated user
   activitiesDb.unshift({
@@ -924,6 +938,7 @@ app.post("/api/systems", (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   };
   systemsDb.unshift(newSystem);
+  if (supabase) void persistSystemRemotely(newSystem);
 
   activitiesDb.unshift({
     id: `act-${Date.now().toString(36)}`,
@@ -3303,7 +3318,7 @@ app.use(express.static(distPath));
   }
 
   if (supabase) {
-    try { await loadUsersFromSupabase(); } catch (error: any) { console.error("Persistent account load failed:", error?.message || error); }
+    try { await loadUsersFromSupabase(); await loadSystemsFromSupabase(); } catch (error: any) { console.error("Persistent account/workspace load failed:", error?.message || error); }
   }
 
   const server = app.listen(PORT, "0.0.0.0", () => {
