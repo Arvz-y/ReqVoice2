@@ -42,6 +42,18 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       const err = await response.json();
       if (err.error) errMsg = err.error;
     } catch {}
+
+    // Render restarts clear the server's in-memory authentication map.
+    // Remove stale client tokens immediately so the UI does not keep sending
+    // an invalid session and can return the user to authentication.
+    if (response.status === 401 && path !== '/api/auth/login' && path !== '/api/auth/register') {
+      setAuthToken(null);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('reqvoice-auth-expired'));
+      }
+      errMsg = 'Your login session has expired. Please sign in again.';
+    }
+
     throw new Error(errMsg);
   }
 
