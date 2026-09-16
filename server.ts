@@ -1154,99 +1154,29 @@ Format as JSON array of objects:
       // Do not let an old/unsupported Render GEMINI_QUESTION_MODEL value
       // override the working Flash models.
       const requestedModel = process.env.GEMINI_QUESTION_MODEL?.trim();
+      // Render's Gemini API is returning the currently supported model names
+      // directly. Prefer those models and do not let an obsolete environment
+      // value such as gemini-2.5-pro break question generation.
+      const requestedModel = process.env.GEMINI_QUESTION_MODEL?.trim();
       const modelCandidates = [
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-3.5-flash",
-        ...(requestedModel && ![
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite",
+        ...(requestedModel &&
+        ![
           "gemini-2.5-pro",
+          "gemini-2.5-flash",
+          "gemini-2.5-flash-lite",
           "gemini-2.0-flash",
           "gemini-2.0-flash-001",
-          "gemini-2.0-flash-lite",
-          "gemini-2.0-flash-lite-001",
-        ].includes(requestedModel) ? [requestedModel] : []),
+          "gemini-3.5-flash",
+        ].includes(requestedModel)
+          ? [requestedModel]
+          : []),
       ].filter((model, index, all) => all.indexOf(model) === index);
 
       let response: any;
       let lastModelError: any;
       const modelErrors: string[] = [];
-
-      const apiKey =
-        process.env.GEMINI_API_KEY ||
-        process.env.GOOGLE_API_KEY ||
-        process.env.GOOGLE_GENAI_API_KEY ||
-        process.env.API_KEY;
-
-      // Primary path: direct Gemini REST API. This is reliable on Render and
-      // exposes the actual Gemini HTTP error if the key/model is rejected.
-      if (apiKey) {
-        for (const modelName of modelCandidates) {
-          try {
-            const restResponse = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  contents: [{ role: "user", parts: [{ text: systemInstruction }] }],
-                  generationConfig: {
-                    temperature: 0.9,
-                    responseMimeType: "application/json",
-                  },
-                }),
-              }
-            );
-
-            const restBody: any = await restResponse.json().catch(() => ({}));
-            if (restResponse.ok) {
-              const generatedText =
-                restBody?.candidates?.[0]?.content?.parts
-                  ?.map((part: any) => part?.text || "")
-                  .join("") || "";
-
-              if (generatedText) {
-                response = { text: generatedText };
-                break;
-              }
-            }
-
-            lastModelError = new Error(
-              `Gemini REST ${restResponse.status}: ${restBody?.error?.message || "No response text"}`
-            );
-            lastGeminiQuestionError = lastModelError.message;
-            modelErrors.push(`${modelName}: ${lastGeminiQuestionError}`);
-            console.warn("Gemini REST question model failed:", modelName, lastGeminiQuestionError);
-          } catch (modelError: any) {
-            lastModelError = modelError;
-            lastGeminiQuestionError = modelError?.message || String(modelError);
-            modelErrors.push(`${modelName}: ${lastGeminiQuestionError}`);
-            console.warn("Gemini REST request failed:", modelName, lastGeminiQuestionError);
-          }
-        }
-      }
-
-      // Secondary path: official @google/genai SDK.
-      if (!response?.text && ai) {
-        for (const modelName of modelCandidates) {
-          try {
-            response = await ai.models.generateContent({
-              model: modelName,
-              contents: systemInstruction,
-              config: {
-                responseMimeType: "application/json",
-                temperature: 0.9,
-              },
-            });
-
-            if (response?.text) break;
-          } catch (modelError: any) {
-            lastModelError = modelError;
-            lastGeminiQuestionError = modelError?.message || String(modelError);
-            modelErrors.push(`${modelName}: ${lastGeminiQuestionError}`);
-            console.warn("Gemini SDK question model failed:", modelName, lastGeminiQuestionError);
-          }
-        }
-      }
 
       if (!response?.text) {
         throw lastModelError || new Error("No Gemini model returned questions.");
