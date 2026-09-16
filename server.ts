@@ -1055,7 +1055,9 @@ Analyze the spoken response and return a JSON object with:
 
 // 6. Gemini Suggest / Generate Questions by Interview Type (Structured, Semi-Structured, Unstructured)
 app.post("/api/gemini/suggest-questions", async (req: Request, res: Response) => {
-  const { systemName, systemType, role, prompt: customPrompt, count, interviewType: rawInterviewType } = req.body;
+  const { systemName, systemType, role, prompt: customPrompt, promptVersion, count, interviewType: rawInterviewType } = req.body;
+  const requestedPrompt = typeof customPrompt === "string" ? customPrompt.trim() : "";
+  const revision = Math.max(1, Number(promptVersion) || 1);
   const ai = getGeminiClient();
   const numQuestions = Math.min(10, Math.max(1, Number(count) || 5));
 
@@ -1098,7 +1100,10 @@ INTERVIEW METHODOLOGY: 2. SEMI-STRUCTURED INTERVIEW
         ? `You are an expert Systems Requirements Analyst conducting a ${interviewType.toUpperCase()} INTERVIEW.
 ${typeGuidance}
 
-Generate exactly ${numQuestions} questions according to this interviewer instruction/prompt: "${customPrompt}".
+Generate exactly ${numQuestions} NEW, SPECIFIC, INTERVIEW-READY questions based primarily on the latest interviewer prompt.
+PROMPT REVISION: ${revision}
+LATEST INTERVIEWER PROMPT: "${requestedPrompt}"
+IMPORTANT: Do not use generic category questions as the main content. Each question must directly address the user prompt and be answerable by the selected interviewee. If the prompt says "deletion of wrong process", ask specifically about identifying, correcting, reversing, deleting, authorizing, validating, auditing, and preventing incorrect processes as appropriate to the system. Do not merely repeat the prompt verbatim.
 Target system: "${systemName || "Enterprise System"}" (${systemType || "Enterprise Platform"}).
 Target role: "${role || "Stakeholder"}".
 Categorize each question appropriately among: workflow, pain_point, expectation, limitation, desired_feature.
