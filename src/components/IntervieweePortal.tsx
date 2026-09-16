@@ -266,9 +266,12 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
       ];
       const mimeType = supportedMimeTypes.find((type) => MediaRecorder.isTypeSupported(type)) || '';
 
+      // Preserve the browser's native recording encoding. Do not force a low
+      // bitrate or perform client-side re-encoding: forced compression can produce
+      // unnecessarily fragile recordings on some browser/device combinations.
+      // The exact MediaRecorder bytes are kept unchanged through local preview,
+      // upload, and server-side video storage.
       const recorderOptions: MediaRecorderOptions = {
-        videoBitsPerSecond: 600000,
-        audioBitsPerSecond: 96000,
         ...(mimeType ? { mimeType } : {}),
       };
       const recorder = new MediaRecorder(mediaStreamRef.current, recorderOptions);
