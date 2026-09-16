@@ -1696,13 +1696,56 @@ Return ONLY JSON:
   "limitations": ["Missing answer coverage, ambiguity, or other evidence limitation."]
 }`;
 
-    const aiRes = await ai.models.generateContent({
-      model: process.env.GEMINI_QUESTION_MODEL || "gemini-2.5-flash",
-      contents: prompt,
-      config: { responseMimeType: "application/json" },
-    });
+    // Use a small fallback chain so AI analytics does not fail just because
+    // the Render environment has an unavailable/limited Gemini model configured.
+    const requestedModel = process.env.GEMINI_ANALYTICS_MODEL?.trim() || process.env.GEMINI_QUESTION_MODEL?.trim();
+    const models = [
+      requestedModel,
+      "gemini-2.5-flash",
+      "gemini-2.0-flash",
+      "gemini-2.0-flash-001",
+      "gemini-2.5-flash-lite",
+    ].filter((m, i, arr): m is string => !!m && arr.indexOf(m) === i);
 
-    const parsed = JSON.parse(aiRes.text || "{}");
+    let aiText = "";
+    let lastAIError = "";
+    for (const model of models) {
+      try {
+        const aiRes = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: { responseMimeType: "application/json" },
+        });
+        aiText = aiRes.text || "";
+        if (aiText.trim()) break;
+        lastAIError = model + ": Gemini returned an empty response.";
+      } catch (err: any) {
+        lastAIError = model + ": " + (err?.message || "request failed");
+        console.warn("[AI ANALYTICS] Gemini model failed:", lastAIError);
+      }
+    }
+
+    if (!aiText.trim()) {
+      res.status(503).json({
+        error: "AI analytics is temporarily unavailable. Check the Gemini API key, model access, and quota in Render.",
+        detail: lastAIError,
+        retryable: true,
+      });
+      return;
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(aiText);
+    } catch (parseError: any) {
+      console.error("[AI ANALYTICS] Invalid JSON from Gemini:", parseError);
+      res.status(502).json({
+        error: "AI returned an invalid analytics response. Please try again.",
+        detail: parseError?.message || "Invalid JSON",
+        retryable: true,
+      });
+      return;
+    }
     const validEvidence = new Set(evidence.map((_, i) => `E${i + 1}`));
     const cleanEvidenceIds = (ids: any) => Array.isArray(ids) ? ids.filter((id) => validEvidence.has(id)) : [];
     const cleanList = (items: any[]) => Array.isArray(items) ? items.map((x: any) => ({ ...x, evidenceIds: cleanEvidenceIds(x?.evidenceIds) })).filter((x: any) => x && typeof x === "object") : [];
