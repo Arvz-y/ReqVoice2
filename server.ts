@@ -1126,13 +1126,27 @@ Format as JSON array of objects:
   }
 ]`;
 
-      const response = await ai.models.generateContent({
-        model: process.env.GEMINI_QUESTION_MODEL || "gemini-2.5-flash",
-        contents: systemInstruction,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
+      const modelCandidates = [
+        process.env.GEMINI_QUESTION_MODEL,
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+      ].filter(Boolean) as string[];
+      let response: any;
+      let lastModelError: any;
+      for (const modelName of modelCandidates) {
+        try {
+          response = await ai.models.generateContent({
+            model: modelName,
+            contents: systemInstruction,
+            config: { responseMimeType: "application/json", temperature: 0.9 },
+          });
+          if (response?.text) break;
+        } catch (modelError) {
+          lastModelError = modelError;
+          console.warn("Question model failed:", modelName, modelError);
+        }
+      }
+      if (!response?.text) throw lastModelError || new Error("No configured AI model returned questions.");
 
       const questions = JSON.parse(response.text || "[]");
       if (Array.isArray(questions) && questions.length > 0) {
