@@ -1,6 +1,7 @@
 import express, { Request, Response } from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import { createServer as createViteServer } from "vite";
@@ -651,16 +652,44 @@ interface StoredUser {
 
 let usersDb: StoredUser[] = [];
 
+const authSessionSecret = process.env.REQVOICE_SESSION_SECRET || supabaseServiceRoleKey || "reqvoice-local-development-secret";
+function createPersistentAuthToken(userId: string): string {
+  const payload = Buffer.from(userId, "utf8").toString("base64url");
+  const signature = crypto.createHmac("sha256", authSessionSecret).update(payload).digest("base64url");
+  return `rv2.${payload}.${signature}`;
+}
+function verifyPersistentAuthToken(token: string): string | null {
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts[0] !== "rv2") return null;
+  const payload = parts[1], signature = parts[2];
+  const expected = crypto.createHmac("sha256", authSessionSecret).update(payload).digest("base64url");
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+  try { return Buffer.from(payload, "base64url").toString("utf8"); } catch { return null; }
+}
+async function persistUserRemotely(user: StoredUser): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.from("app_users").upsert({ id: user.id, name: user.name, username: user.username, email: user.email, password: user.password, role: user.role, department: user.department, avatar_url: user.avatarUrl, bio: user.bio, is_first_time: user.isFirstTime, has_completed_tutorial: user.hasCompletedTutorial, created_at: user.createdAt }, { onConflict: "id" });
+  if (error) throw new Error("Supabase user save failed: " + error.message);
+}
+async function loadUsersFromSupabase(): Promise<void> {
+  if (!supabase) return;
+  const { data, error } = await supabase.from("app_users").select("*").order("created_at", { ascending: true });
+  if (error) throw new Error("Supabase user load failed: " + error.message);
+  usersDb = (data || []).map((u: any) => ({ id: u.id, name: u.name, username: u.username, email: u.email, password: u.password, role: u.role, department: u.department, avatarUrl: u.avatar_url || "", bio: u.bio || "", isFirstTime: !!u.is_first_time, hasCompletedTutorial: !!u.has_completed_tutorial, createdAt: u.created_at }));
+  console.log(`Loaded ${usersDb.length} persistent account(s).`);
+}
 
-// Active authenticated sessions: token -> StoredUser (No default auto-login session for security)
+// Signed tokens remain valid after Render restarts; the in-memory map is only a fast path.
 const activeSessions = new Map<string, StoredUser>();
-
 function getAuthUser(req: Request): StoredUser | null {
   const authHeader = req.headers.authorization;
   if (!authHeader) return null;
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
-  return activeSessions.get(token) || null;
+  const active = activeSessions.get(token);
+  if (active) return active;
+  const userId = verifyPersistentAuthToken(token);
+  return userId ? (usersDb.find((u) => u.id === userId) || null) : null;
 }
 
 function sanitizeUser(user: StoredUser) {
@@ -709,7 +738,7 @@ app.post("/api/auth/login", (req: Request, res: Response) => {
     return;
   }
 
-  const token = `rv2_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 10)}`;
+  const token = createPersistentAuthToken(user.id);
   activeSessions.set(token, user);
   res.json({ success: true, token, user: sanitizeUser(user) });
 });
@@ -745,6 +774,7 @@ app.post("/api/auth/register", (req: Request, res: Response) => {
   };
 
   usersDb.push(newUser);
+  if (supabase) await persistUserRemotely(newUser);
 
   // Initialize a personalized default system workspace for the new user
   const initialSystem: StoredSystem = {
@@ -769,7 +799,7 @@ app.post("/api/auth/register", (req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
   });
 
-  const token = `rv2_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 10)}`;
+  const token = createPersistentAuthToken(newUser.id);
   activeSessions.set(token, newUser);
   res.json({ success: true, token, user: sanitizeUser(newUser) });
 });
@@ -818,6 +848,7 @@ app.put("/api/auth/profile", (req: Request, res: Response) => {
     }
   });
 
+  if (supabase) void persistUserRemotely(user);
   res.json({ success: true, user: sanitizeUser(user) });
 });
 
@@ -845,6 +876,7 @@ app.put("/api/auth/password", (req: Request, res: Response) => {
   }
 
   user.password = newPassword;
+  if (supabase) void persistUserRemotely(user);
   res.json({ success: true, message: "Password updated successfully." });
 });
 
@@ -853,6 +885,7 @@ app.post("/api/auth/tutorial-completed", (req: Request, res: Response) => {
   if (user) {
     user.hasCompletedTutorial = true;
     user.isFirstTime = false;
+    if (supabase) void persistUserRemotely(user);
   }
   res.json({ success: true });
 });
@@ -3267,6 +3300,10 @@ app.use(express.static(distPath));
     app.get("*", (req: Request, res: Response) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
+  }
+
+  if (supabase) {
+    try { await loadUsersFromSupabase(); } catch (error: any) { console.error("Persistent account load failed:", error?.message || error); }
   }
 
   const server = app.listen(PORT, "0.0.0.0", () => {
