@@ -1188,6 +1188,8 @@ app.post("/api/gemini/suggest-questions", async (req: Request, res: Response) =>
 
   let typeGuidance = "";
   let lastGeminiQuestionError = "";
+  let lastModelError: any = null;
+  const modelErrors: string[] = [];
 
   if (interviewType === "Structured") {
     typeGuidance = `
@@ -1271,8 +1273,6 @@ Format as JSON array of objects:
       ].filter((model, index, all) => all.indexOf(model) === index);
 
       let response: any = null;
-      let lastModelError: any = null;
-      const modelErrors: string[] = [];
 
       // Try each supported model independently. A temporary 503 from one model
       // must not prevent the next available model from generating the questions.
@@ -1330,9 +1330,11 @@ Format as JSON array of objects:
     process.env.API_KEY
   );
   res.status(503).json({
+    code: hasApiKey ? "AI_GENERATION_FAILED" : "AI_NOT_CONFIGURED",
     error: hasApiKey
       ? `AI question generation failed. ${modelErrors.length ? modelErrors.join(" | ") : (lastGeminiQuestionError || "Gemini did not return a usable response.")} No generic questions were substituted.`
       : "Gemini API credentials are not configured on the server. Set GEMINI_API_KEY in the Render Environment variables. No generic questions were substituted.",
+    retryable: modelErrors.some((message) => /429|500|502|503|504|UNAVAILABLE|overloaded|high demand|timeout/i.test(message)),
     promptVersion: revision,
   });
   return;
@@ -1410,15 +1412,20 @@ app.get("/api/videos/:id/download", (req: Request, res: Response) => {
   const stored = videosStore.get(videoId);
 
   let videoBuffer: Buffer | null = null;
+  let downloadMimeType = "video/webm";
+  let downloadExtension = "webm";
   if (stored && stored.buffer) {
     videoBuffer = stored.buffer;
+    downloadMimeType = stored.mimeType || "video/webm";
+    downloadExtension = downloadMimeType.includes("mp4") ? "mp4" : downloadMimeType.includes("ogg") ? "ogg" : "webm";
   } else {
     const candidates = ["webm", "mp4", "ogg"];
     for (const ext of candidates) {
       const diskPath = path.join(userVideosDir, videoId + "." + ext);
       if (fs.existsSync(diskPath)) {
         videoBuffer = fs.readFileSync(diskPath);
-        mimeType = ext === "mp4" ? "video/mp4" : ext === "ogg" ? "video/ogg" : "video/webm";
+        downloadMimeType = ext === "mp4" ? "video/mp4" : ext === "ogg" ? "video/ogg" : "video/webm";
+        downloadExtension = ext;
         break;
       }
     }
@@ -1429,8 +1436,8 @@ app.get("/api/videos/:id/download", (req: Request, res: Response) => {
     return;
   }
 
-  res.setHeader("Content-Disposition", `attachment; filename="reqvoice_response_${videoId}.webm"`);
-  res.setHeader("Content-Type", "video/webm");
+  res.setHeader("Content-Disposition", `attachment; filename="reqvoice_response_${videoId}.${downloadExtension}"`);
+  res.setHeader("Content-Type", downloadMimeType);
   res.send(videoBuffer);
 });
 
@@ -2031,8 +2038,8 @@ app.get("/api/ai/models", (_req: Request, res: Response) => {
   res.json({
     models: [
       {
-        id: "gemini-2.5-flash",
-        name: "Gemini 2.5 Flash",
+        id: "gemini-3.6-flash",
+        name: "Gemini 3.6 Flash",
         provider: "Google Gemini",
         tagline: "Ultra-fast & multimodal default for requirements gathering",
         speed: "Fastest (~0.5s)",
@@ -2040,8 +2047,8 @@ app.get("/api/ai/models", (_req: Request, res: Response) => {
         recommended: true,
       },
       {
-        id: "gemini-2.5-pro",
-        name: "Gemini 2.5 Pro",
+        id: "gemini-3.6-pro",
+        name: "Gemini 3.6 Pro",
         provider: "Google Gemini",
         tagline: "Complex enterprise architectural reasoning & deep spec analysis",
         speed: "Deep Reasoning (~1.8s)",
@@ -2049,8 +2056,8 @@ app.get("/api/ai/models", (_req: Request, res: Response) => {
         recommended: false,
       },
       {
-        id: "gemini-1.5-pro",
-        name: "Gemini 1.5 Pro",
+        id: "gemini-3.5-flash-lite",
+        name: "Gemini 3.5 Flash Lite",
         provider: "Google Gemini",
         tagline: "High-stability long-document architectural synthesis",
         speed: "Standard (~1.5s)",
@@ -2058,8 +2065,8 @@ app.get("/api/ai/models", (_req: Request, res: Response) => {
         recommended: false,
       },
       {
-        id: "gemini-1.5-flash",
-        name: "Gemini 1.5 Flash",
+        id: "gemini-3.6-flash",
+        name: "Gemini 3.6 Flash",
         provider: "Google Gemini",
         tagline: "Lightweight, low-latency requirements parsing",
         speed: "Fast (~0.8s)",
@@ -2213,7 +2220,26 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+    
+// Final Express error boundary: return JSON instead of allowing an uncaught
+// route error to terminate the request and appear as a generic Render 502.
+app.use((err: any, req: Request, res: Response, _next: any) => {
+  const requestId = `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  console.error(`[API_ERROR ${requestId}] ${req.method} ${req.originalUrl}`, err);
+
+  if (res.headersSent) return;
+
+  const status = Number(err?.status || err?.statusCode);
+  const safeStatus = status >= 400 && status < 600 ? status : 500;
+  res.status(safeStatus).json({
+    error: err?.message || "The server could not complete the request.",
+    code: err?.code || "INTERNAL_SERVER_ERROR",
+    requestId,
+    retryable: safeStatus >= 500,
+  });
+});
+
+app.use(express.static(distPath));
     app.get("*", (req: Request, res: Response) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
