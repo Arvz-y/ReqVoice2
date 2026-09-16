@@ -1325,15 +1325,22 @@ app.get("/api/share/:token", async (req: Request, res: Response) => {
 // Binary video upload. The browser sends the Blob directly instead of embedding it in JSON/base64.
 app.post(
   "/api/share/:token/video",
-  express.raw({ type: ["video/*", "application/octet-stream"], limit: "20mb" }),
+  express.raw({ type: ["application/octet-stream", "video/*"], limit: "20mb" }),
   async (req: Request, res: Response) => {
-    const interview = (supabase ? await getRemoteInterviewByShareToken(req.params.token) : undefined) || findPersistedInterviewByShareToken(req.params.token);
-    if (!interview) {
-      res.status(404).json({ error: "Interview session expired or not found." });
-      return;
-    }
+    try {
+      const interview =
+        (supabase ? await getRemoteInterviewByShareToken(req.params.token) : undefined) ||
+        findPersistedInterviewByShareToken(req.params.token);
+      if (!interview) {
+        res.status(404).json({
+          code: "INTERVIEW_SESSION_NOT_FOUND",
+          error: "Interview session expired or could not be restored. Please reopen the latest interview link.",
+          retryable: false,
+        });
+        return;
+      }
 
-    const questionId = String(req.headers["x-question-id"] || "");
+      const questionId = String(req.headers["x-question-id"] || "");
     const videoId = String(req.headers["x-video-id"] || "");
     const durationSeconds = Number(req.headers["x-duration-seconds"] || 0) || 0;
     const uploadOffset = Math.max(0, Number(req.headers["x-upload-offset"] || 0) || 0);
@@ -1350,7 +1357,34 @@ app.post(
       return;
     }
 
-    const chunk = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || []);
+    let chunk: Buffer;
+    if (Buffer.isBuffer(req.body)) {
+      chunk = req.body;
+    } else if (req.body instanceof ArrayBuffer) {
+      chunk = Buffer.from(req.body);
+    } else if (ArrayBuffer.isView(req.body)) {
+      chunk = Buffer.from(req.body.buffer, req.body.byteOffset, req.body.byteLength);
+    } else if (
+      req.body &&
+      typeof req.body === "object" &&
+      (req.body as any).type === "Buffer" &&
+      Array.isArray((req.body as any).data)
+    ) {
+      chunk = Buffer.from((req.body as any).data);
+    } else {
+      console.warn("Rejected non-binary video upload body:", {
+        bodyType: typeof req.body,
+        constructor: req.body?.constructor?.name,
+        contentType: req.headers["content-type"],
+        contentLength: req.headers["content-length"],
+      });
+      res.status(400).json({
+        code: "VIDEO_BODY_INVALID",
+        error: "The uploaded recording was not received as binary video data. Please retry the recording.",
+        retryable: true,
+      });
+      return;
+    }
     if (!chunk.length) {
       res.status(422).json({ code: "VIDEO_CHUNK_EMPTY", error: "The uploaded video chunk is empty." });
       return;
@@ -1502,6 +1536,15 @@ app.post(
         code: "VIDEO_DATABASE_WRITE_FAILED",
         error: "The recording could not be saved to the video database.",
         details: process.env.NODE_ENV === "production" ? undefined : error?.message,
+        retryable: true,
+      });
+    }
+    } catch (error: any) {
+      console.error("Video upload route failed:", error);
+      if (res.headersSent) return;
+      res.status(500).json({
+        code: "VIDEO_UPLOAD_FAILED",
+        error: "The recording upload could not be completed. Please retry the recording.",
         retryable: true,
       });
     }
