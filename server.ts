@@ -1081,6 +1081,7 @@ app.post("/api/gemini/suggest-questions", async (req: Request, res: Response) =>
     "Semi-Structured";
 
   let typeGuidance = "";
+  let lastGeminiQuestionError = "";
 
   if (interviewType === "Structured") {
     typeGuidance = `
@@ -1097,7 +1098,6 @@ INTERVIEW METHODOLOGY: 3. UNSTRUCTURED INTERVIEW
 - Avoid restrictive technical interrogation; invite storytelling, reflection, and strategic aspirations.
 - Suggested follow-ups should be empathetic, open conversational probes encouraging the stakeholder to expand further.`;
   } else {
-    baseFallback = SEMI_STRUCTURED_QUESTIONS;
     typeGuidance = `
 INTERVIEW METHODOLOGY: 2. SEMI-STRUCTURED INTERVIEW
 - Guided core framework combining standardized functional questions with exploratory follow-up probes.
@@ -1166,7 +1166,8 @@ Format as JSON array of objects:
           if (response?.text) break;
         } catch (modelError: any) {
           lastModelError = modelError;
-          console.warn("Gemini SDK question model failed:", modelName, modelError?.message || modelError);
+          lastGeminiQuestionError = modelError?.message || String(modelError);
+          console.warn("Gemini SDK question model failed:", modelName, lastGeminiQuestionError);
         }
       }
 
@@ -1212,10 +1213,12 @@ Format as JSON array of objects:
               lastModelError = new Error(
                 `Gemini REST ${restResponse.status}: ${restBody?.error?.message || "No response text"}`
               );
-              console.warn("Gemini REST question model failed:", modelName, lastModelError.message);
+              lastGeminiQuestionError = lastModelError.message;
+              console.warn("Gemini REST question model failed:", modelName, lastGeminiQuestionError);
             } catch (modelError: any) {
               lastModelError = modelError;
-              console.warn("Gemini REST request failed:", modelName, modelError?.message || modelError);
+              lastGeminiQuestionError = modelError?.message || String(modelError);
+              console.warn("Gemini REST request failed:", modelName, lastGeminiQuestionError);
             }
           }
         }
@@ -1253,8 +1256,8 @@ Format as JSON array of objects:
   );
   res.status(503).json({
     error: hasApiKey
-      ? "AI question generation failed after trying the configured Gemini models. No generic questions were substituted. Please try again or check the server model configuration."
-      : "Gemini API credentials are not configured on the server. Set GEMINI_API_KEY in the deployment Secrets panel. No generic questions were substituted.",
+      ? `AI question generation failed. ${lastGeminiQuestionError || "Gemini did not return a usable response."} No generic questions were substituted.`
+      : "Gemini API credentials are not configured on the server. Set GEMINI_API_KEY in the Render Environment variables. No generic questions were substituted.",
     promptVersion: revision,
   });
   return;
