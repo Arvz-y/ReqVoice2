@@ -10,6 +10,7 @@ interface AnalyticsViewProps {
   interviews: InterviewSession[];
   systems: SystemUnderStudy[];
   selectedInterviewId?: string | null;
+  onNavigateToTab?: (tab: string) => void;
 }
 
 type InsightItem = {
@@ -97,7 +98,7 @@ const InsightCard: React.FC<{ item: InsightItem; evidence: AIAnalytics['evidence
   );
 };
 
-export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ interviews, systems, selectedInterviewId }) => {
+export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ interviews, systems, selectedInterviewId, onNavigateToTab }) => {
   const selectedInterview = interviews.find(i => i.id === selectedInterviewId);
   const completed = useMemo(() => interviews.filter(i => i.status === 'completed'), [interviews]);
 
@@ -209,9 +210,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ interviews, system
         </p>
         <div className="flex flex-wrap justify-center gap-2 mt-5">
           <button
-            onClick={() => {
-              window.dispatchEvent(new CustomEvent('reqvoice:navigate', { detail: 'systems' }));
-            }}
+            onClick={() => onNavigateToTab?.('systems')}
             className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs font-semibold hover:bg-slate-800"
           >
             Go to Systems & Guides
