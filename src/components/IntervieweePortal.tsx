@@ -264,11 +264,12 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
       ];
       const mimeType = supportedMimeTypes.find((type) => MediaRecorder.isTypeSupported(type)) || '';
 
-      const recorder = new MediaRecorder(mediaStreamRef.current, {
-        mimeType,
+      const recorderOptions: MediaRecorderOptions = {
         videoBitsPerSecond: 600000,
         audioBitsPerSecond: 96000,
-      });
+        ...(mimeType ? { mimeType } : {}),
+      };
+      const recorder = new MediaRecorder(mediaStreamRef.current, recorderOptions);
 
       recorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
@@ -335,17 +336,13 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
           probe.removeAttribute('src');
           probe.load();
         } catch (validationError: any) {
-          console.error('Recorded media validation failed:', validationError);
-          URL.revokeObjectURL(videoUrl);
-          setRecordedBlob(null);
-          setRecordedVideoUrl(null);
+          // Do not discard a non-empty recording just because the current browser
+          // cannot preview its codec. The server validates the container and can
+          // transcode WebM/Ogg to H.264/AAC MP4 for delivery.
+          console.warn('Recorded media preview validation failed; keeping recording for server delivery:', validationError);
           setCameraError(
-            'The recording was created but could not be decoded by this browser. Please record again using the current camera/microphone.'
+            'Preview is unavailable in this browser, but the recording is still available and can be submitted. The server will prepare a compatible playback copy.'
           );
-          setIsRecording(false);
-          recordingStartedAtRef.current = null;
-          mediaRecorderRef.current = null;
-          return;
         }
 
         // Store video in local IndexedDB and record ID for cleanup on re-record
