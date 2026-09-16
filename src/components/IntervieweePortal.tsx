@@ -168,10 +168,20 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       mediaStreamRef.current = stream;
 
-      if (liveVideoRef.current) {
-        liveVideoRef.current.srcObject = stream;
-        await liveVideoRef.current.play().catch(() => {});
-      }
+      // Render the viewfinder first, then attach the live MediaStream. This avoids
+      // the race where React has not mounted the <video> element yet.
+      setCameraActive(true);
+      const attachLivePreview = () => {
+        const video = liveVideoRef.current;
+        const activeStream = mediaStreamRef.current;
+        if (!video || !activeStream) return;
+        if (video.srcObject !== activeStream) video.srcObject = activeStream;
+        video.muted = true;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.play().catch(() => {});
+      };
+      requestAnimationFrame(attachLivePreview);
 
       // Initialize audio waveform visualizer
       try {
@@ -201,7 +211,7 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
         console.warn('Audio visualizer setup error:', e);
       }
 
-      setCameraActive(true);
+      requestAnimationFrame(attachLivePreview);
     } catch (err: any) {
       console.error('Camera access failed:', err);
       setCameraError(
@@ -861,6 +871,9 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
                           autoPlay
                           playsInline
                           muted
+                          onLoadedMetadata={(e) => {
+                            e.currentTarget.play().catch(() => {});
+                          }}
                           className="w-full h-full object-cover scale-x-[-1]"
                         />
 
