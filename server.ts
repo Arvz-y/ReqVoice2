@@ -160,24 +160,37 @@ function isGeminiModelUnavailableError(err: any): boolean {
 }
 
 async function listAvailableGeminiGenerateModels(ai: GoogleGenAI): Promise<string[]> {
+  const apiKey =
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY ||
+    process.env.API_KEY;
+  if (!apiKey) return [];
+
   const available: string[] = [];
   try {
-    const pager: any = await ai.models.list({ config: { pageSize: 100 } } as any);
-    const items = pager?.items || pager?.models || [];
-    for (const m of items) {
-      const name = String(m?.name || m?.baseModelId || m?.model || "").replace(/^models\//, "");
-      const actions = Array.isArray(m?.supportedActions) ? m.supportedActions : [];
-      if (name && (!actions.length || actions.includes("generateContent"))) available.push(name);
-    }
-    let page = pager;
-    while (page?.nextPageToken) {
-      page = await ai.models.list({ config: { pageSize: 100, pageToken: page.nextPageToken } } as any);
-      for (const m of (page?.items || page?.models || [])) {
-        const name = String(m?.name || m?.baseModelId || m?.model || "").replace(/^models\//, "");
-        const actions = Array.isArray(m?.supportedActions) ? m.supportedActions : [];
-        if (name && (!actions.length || actions.includes("generateContent"))) available.push(name);
+    let pageToken = "";
+    do {
+      const url = new URL("https://generativelanguage.googleapis.com/v1beta/models");
+      url.searchParams.set("pageSize", "100");
+      url.searchParams.set("key", apiKey);
+      if (pageToken) url.searchParams.set("pageToken", pageToken);
+
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("Gemini model discovery failed with HTTP " + response.status);
+      const payload: any = await response.json();
+
+      for (const m of payload?.models || []) {
+        const name = String(m?.name || "").replace(/^models\//, "");
+        const actions = Array.isArray(m?.supportedGenerationMethods)
+          ? m.supportedGenerationMethods
+          : Array.isArray(m?.supportedActions) ? m.supportedActions : [];
+        if (name && (!actions.length || actions.includes("generateContent"))) {
+          available.push(name);
+        }
       }
-    }
+      pageToken = payload?.nextPageToken || "";
+    } while (pageToken);
   } catch (err: any) {
     console.warn("[AI MODEL DISCOVERY] Unable to list Gemini models:", err?.message || err);
   }
