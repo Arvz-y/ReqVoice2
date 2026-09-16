@@ -50,7 +50,7 @@ async function ensureSupabaseVideoBucket(): Promise<void> {
   const { data: buckets, error: listError } = await supabase.storage.listBuckets();
   if (listError) throw new Error("Supabase Storage bucket check failed: " + listError.message);
   if (!buckets?.some((b) => b.name === SUPABASE_VIDEO_BUCKET)) {
-    const { error } = await supabase.storage.createBucket(SUPABASE_VIDEO_BUCKET, { public: false, fileSizeLimit: "50MB" });
+    const { error } = await supabase.storage.createBucket(SUPABASE_VIDEO_BUCKET, { public: false, fileSizeLimit: "100MB" });
     if (error && !/already exists/i.test(error.message)) throw new Error("Supabase Storage bucket creation failed: " + error.message);
   }
 }
@@ -998,8 +998,13 @@ app.post("/api/interviews", async (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   };
 
+  // Persist remotely before exposing the session to the interviewee. Render local storage is ephemeral.
+  if (supabase) {
+    await persistInterviewRemotely(newInterview);
+  } else {
+    saveInterviewToDatabase(newInterview);
+  }
   interviewsDb.unshift(newInterview);
-  saveInterviewToDatabase(newInterview);
 
   activitiesDb.unshift({
     id: `act-${Date.now().toString(36)}`,
@@ -1021,7 +1026,7 @@ app.post("/api/interviews", async (req: Request, res: Response) => {
 });
 
 app.post("/api/interviews/:id/response", async (req: Request, res: Response) => {
-  const interview = findPersistedInterviewById(req.params.id);
+  const interview = (supabase ? await getRemoteInterviewById(req.params.id) : undefined) || findPersistedInterviewById(req.params.id);
   if (!interview) {
     res.status(404).json({ error: "Interview not found" });
     return;
