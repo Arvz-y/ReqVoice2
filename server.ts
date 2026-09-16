@@ -753,84 +753,103 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
 });
 
 app.post("/api/auth/register", async (req: Request, res: Response) => {
-  const { name, username, email, password, role, department } = req.body;
-  if (!name || !username || !email || !password) {
-    res.status(400).json({ error: "All registration fields are required." });
-    return;
-  }
-
-  const existing = usersDb.find(
-    (u) => u.username.toLowerCase() === username.trim().toLowerCase() || u.email.toLowerCase() === email.trim().toLowerCase()
-  );
-  if (existing) {
-    res.status(400).json({ error: "Username or email already registered." });
-    return;
-  }
-
-  let authUserId = `usr-${Date.now().toString(36)}`;
-  if (supabase) {
-    if (!supabaseAuth) {
-      res.status(503).json({ error: "Supabase Auth client is not configured. Add SUPABASE_ANON_KEY to the server environment." });
+  try {
+    const { name, username, email, password, role, department } = req.body;
+    if (!name || !username || !email || !password) {
+      res.status(400).json({ error: "All registration fields are required." });
       return;
     }
+
+    const normalizedUsername = username.trim().toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
+    const existing = usersDb.find(
+      (u) => u.username.toLowerCase() === normalizedUsername || u.email.toLowerCase() === normalizedEmail
+    );
+    if (existing) {
+      res.status(400).json({ error: "Username or email already registered." });
+      return;
+    }
+
+    if (!supabase || !supabaseAuth) {
+      res.status(503).json({ error: "Supabase authentication is not configured on the server. Check SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_PUBLISHABLE_KEY." });
+      return;
+    }
+
     const { data: createdAuth, error: authError } = await supabase.auth.admin.createUser({
-      email: email.trim().toLowerCase(),
-      password: password.trim(),
+      email: normalizedEmail,
+      password: String(password),
       email_confirm: true,
-      user_metadata: { name: name.trim(), username: username.trim().toLowerCase(), role: role || "Requirements Engineer", department: department || "Systems Engineering" },
+      user_metadata: {
+        name: name.trim(),
+        username: normalizedUsername,
+        role: role || "Requirements Engineer",
+        department: department || "Systems Engineering",
+      },
     });
+
     if (authError || !createdAuth.user) {
       res.status(400).json({ error: authError?.message || "Unable to create secure authentication account." });
       return;
     }
-    authUserId = createdAuth.user.id;
+
+    const newUser: StoredUser = {
+      id: createdAuth.user.id,
+      name: name.trim(),
+      username: normalizedUsername,
+      email: normalizedEmail,
+      password: "",
+      role: role || "Requirements Engineer",
+      department: department || "Systems Engineering",
+      avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=${normalizedUsername}`,
+      bio: "Systems requirements specialist.",
+      isFirstTime: true,
+      hasCompletedTutorial: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      await persistUserRemotely(newUser);
+      usersDb.push(newUser);
+
+      const initialSystem: StoredSystem = {
+        id: `sys-${Date.now().toString(36)}`,
+        userId: newUser.id,
+        name: `${newUser.department || "Enterprise"} Portal Modernization`,
+        type: "Enterprise Information Architecture",
+        description: `Requirements discovery and stakeholder feedback repository for ${newUser.name}.`,
+        lifecycleState: "proposed",
+        targetRoles: [newUser.role || "Requirements Analyst", "Key Stakeholder", "Operations Manager"],
+        createdAt: new Date().toISOString(),
+      };
+
+      await persistSystemRemotely(initialSystem);
+      systemsDb.unshift(initialSystem);
+
+      activitiesDb.unshift({
+        id: `act-${Date.now().toString(36)}`,
+        userId: newUser.id,
+        type: "login",
+        title: "Account Space Initialized",
+        description: `Welcome to ReqVoice, ${newUser.name}. Your private requirements workspace has been configured.`,
+        timestamp: new Date().toISOString(),
+      });
+
+      const token = createPersistentAuthToken(newUser.id);
+      activeSessions.set(token, newUser);
+      res.status(201).json({ success: true, token, user: sanitizeUser(newUser) });
+    } catch (storageError: any) {
+      // Do not leave an orphaned Supabase Auth account when profile/workspace creation fails.
+      try { await supabase.auth.admin.deleteUser(createdAuth.user.id); } catch {}
+      console.error("[AUTH REGISTER] Profile/workspace persistence failed:", storageError);
+      res.status(502).json({
+        error: "Account authentication was created, but the ReqVoice profile could not be saved.",
+        detail: storageError?.message || "Unknown persistence error",
+      });
+    }
+  } catch (error: any) {
+    console.error("[AUTH REGISTER] Unexpected error:", error);
+    res.status(500).json({ error: "Registration failed unexpectedly.", detail: error?.message || "Unknown error" });
   }
-
-  const newUser: StoredUser = {
-    id: authUserId,
-    name: name.trim(),
-    username: username.trim().toLowerCase(),
-    email: email.trim().toLowerCase(),
-    password: "",
-    role: role || "Requirements Engineer",
-    department: department || "Systems Engineering",
-    avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=${username}`,
-    bio: "Systems requirements specialist.",
-    isFirstTime: true,
-    hasCompletedTutorial: false,
-    createdAt: new Date().toISOString(),
-  };
-
-  usersDb.push(newUser);
-  if (supabase) await persistUserRemotely(newUser);
-
-  // Initialize a personalized default system workspace for the new user
-  const initialSystem: StoredSystem = {
-    id: `sys-${Date.now().toString(36)}`,
-    userId: newUser.id,
-    name: `${newUser.department || "Enterprise"} Portal Modernization`,
-    type: "Enterprise Information Architecture",
-    description: `Requirements discovery and stakeholder feedback repository for ${newUser.name}.`,
-    lifecycleState: "proposed",
-    targetRoles: [newUser.role || "Requirements Analyst", "Key Stakeholder", "Operations Manager"],
-    createdAt: new Date().toISOString(),
-  };
-  systemsDb.unshift(initialSystem);
-  if (supabase) await persistSystemRemotely(initialSystem);
-
-  // Initialize first activity record for this isolated user
-  activitiesDb.unshift({
-    id: `act-${Date.now().toString(36)}`,
-    userId: newUser.id,
-    type: "login",
-    title: "Account Space Initialized",
-    description: `Welcome to ReqVoice, ${newUser.name}. Your private requirements workspace has been configured.`,
-    timestamp: new Date().toISOString(),
-  });
-
-  const token = createPersistentAuthToken(newUser.id);
-  activeSessions.set(token, newUser);
-  res.json({ success: true, token, user: sanitizeUser(newUser) });
 });
 
 app.post("/api/auth/logout", (req: Request, res: Response) => {
