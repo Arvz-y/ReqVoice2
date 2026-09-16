@@ -1151,20 +1151,78 @@ Format as JSON array of objects:
       ].filter(Boolean) as string[];
       let response: any;
       let lastModelError: any;
+
+      // Primary path: official @google/genai SDK.
       for (const modelName of modelCandidates) {
         try {
           response = await ai.models.generateContent({
             model: modelName,
             contents: systemInstruction,
-            config: { responseMimeType: "application/json", temperature: 0.9 },
+            config: {
+              responseMimeType: "application/json",
+              temperature: 0.9,
+            },
           });
           if (response?.text) break;
-        } catch (modelError) {
+        } catch (modelError: any) {
           lastModelError = modelError;
-          console.warn("Question model failed:", modelName, modelError);
+          console.warn("Gemini SDK question model failed:", modelName, modelError?.message || modelError);
         }
       }
-      if (!response?.text) throw lastModelError || new Error("No configured AI model returned questions.");
+
+      // Secondary path: direct Gemini REST API. This makes question generation
+      // resilient to SDK/model compatibility issues on hosted environments such as Render.
+      if (!response?.text) {
+        const apiKey =
+          process.env.GEMINI_API_KEY ||
+          process.env.GOOGLE_API_KEY ||
+          process.env.GOOGLE_GENAI_API_KEY ||
+          process.env.API_KEY;
+
+        if (apiKey) {
+          for (const modelName of modelCandidates) {
+            try {
+              const restResponse = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    contents: [{ role: "user", parts: [{ text: systemInstruction }] }],
+                    generationConfig: {
+                      temperature: 0.9,
+                      responseMimeType: "application/json",
+                    },
+                  }),
+                }
+              );
+
+              const restBody: any = await restResponse.json().catch(() => ({}));
+              if (restResponse.ok) {
+                const text =
+                  restBody?.candidates?.[0]?.content?.parts
+                    ?.map((part: any) => part?.text || "")
+                    .join("") || "";
+                if (text) {
+                  response = { text };
+                  break;
+                }
+              }
+
+              lastModelError = new Error(
+                `Gemini REST ${restResponse.status}: ${restBody?.error?.message || "No response text"}`
+              );
+              console.warn("Gemini REST question model failed:", modelName, lastModelError.message);
+            } catch (modelError: any) {
+              lastModelError = modelError;
+              console.warn("Gemini REST request failed:", modelName, modelError?.message || modelError);
+            }
+          }
+        }
+      }
+
+      if (!response?.text) {
+        throw lastModelError || new Error("No Gemini model returned questions.");
 
       const questions = JSON.parse(response.text || "[]");
       if (Array.isArray(questions) && questions.length > 0) {
@@ -1179,8 +1237,8 @@ Format as JSON array of objects:
         });
         return;
       }
-    } catch (err) {
-      console.warn("Gemini question suggestion failed:", err);
+    } catch (err: any) {
+      console.warn("Gemini question suggestion failed:", err?.message || err);
     }
   }
 
