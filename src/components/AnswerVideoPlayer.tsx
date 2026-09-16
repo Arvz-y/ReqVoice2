@@ -42,6 +42,27 @@ export const AnswerVideoPlayer: React.FC<AnswerVideoPlayerProps> = ({
   const [resolvedUrl, setResolvedUrl] = useState<string>('');
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(videoRecording?.durationSeconds || 0);
+  const [openingDevicePlayer, setOpeningDevicePlayer] = useState(false);
+
+  // Browsers cannot reliably force an OS-specific media app to open. This
+  // cross-device handoff downloads the original recording so the user can
+  // open it with the device's configured/default video player, bypassing
+  // browser codec limitations.
+  const openWithDevicePlayer = () => {
+    if (!downloadUrl) return;
+    setOpeningDevicePlayer(true);
+    try {
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `reqvoice_recording_${videoRecording?.id || 'answer'}`;
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } finally {
+      window.setTimeout(() => setOpeningDevicePlayer(false), 1200);
+    }
+  };
 
   // Compute best source URL
   useEffect(() => {
@@ -255,6 +276,20 @@ export const AnswerVideoPlayer: React.FC<AnswerVideoPlayerProps> = ({
                 <span>{usingAudioFallback ? 'Show Video' : 'Audio Mode'}</span>
               </button>
 
+              {/* Device player handoff */}
+              {downloadUrl && (
+                <button
+                  type="button"
+                  onClick={openWithDevicePlayer}
+                  disabled={openingDevicePlayer}
+                  className="flex items-center space-x-1 px-2 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 hover:text-emerald-200 text-[11px] border border-emerald-500/30 transition-colors cursor-pointer disabled:opacity-60"
+                  title="Download the original recording for playback with your device's default video player"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>{openingDevicePlayer ? 'Preparing…' : 'Open in Device Player'}</span>
+                </button>
+              )}
+
               {/* Direct Download Button */}
               {downloadUrl && (
                 <a
@@ -292,7 +327,7 @@ export const AnswerVideoPlayer: React.FC<AnswerVideoPlayerProps> = ({
           <div className="space-y-0.5">
             <p className="font-semibold text-amber-300">Alternative Media Player Engaged</p>
             <p className="text-amber-200/80">
-              Your browser cannot decode this video container stream directly. The audio answer and transcription are intact above, or click "Download" to play in external media player.
+              Your browser cannot decode this video container stream directly. The original recording is still available. Use "Open in Device Player" or "Download" to open the file with your device's media player.
             </p>
           </div>
         </div>
