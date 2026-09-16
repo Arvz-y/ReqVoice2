@@ -35,6 +35,10 @@ export interface RecordedVideoData {
   videoUrl?: string; // base64 or blob URL
   videoBlobKey?: string; // IndexedDB storage key
   mimeType: string;
+  sourceMimeType?: string;
+  deliveryMimeType?: string;
+  storageStatus?: 'saved' | 'pending' | 'failed';
+  storagePath?: string;
   durationSeconds: number;
   compressionStats: VideoCompressionStats;
   recordedAt: string;
