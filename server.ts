@@ -6,6 +6,7 @@ import { GoogleGenAI } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 import { spawn } from "child_process";
 import ffmpegPath from "ffmpeg-static";
+import { DatabaseSync } from "node:sqlite";
 
 dotenv.config();
 
@@ -1371,7 +1372,27 @@ const streamStoredVideo = (req: Request, res: Response, download = false) => {
   res.end(stored.buffer.subarray(start, end + 1));
 };
 
-const streamBufferWithRanges = (req: Request, res: Response, buffer: Buffer, mimeType: string, downloadName?: string) => {,  const total = buffer.length;,  if (!total) { res.status(404).json({ error: "Recorded video is empty." }); return; },  res.setHeader("Accept-Ranges", "bytes");,  res.setHeader("Content-Type", mimeType);,  res.setHeader("Cache-Control", "private, max-age=3600");,  if (downloadName) res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);,  const range = req.headers.range;,  if (!range) { res.setHeader("Content-Length", total); res.status(200).end(buffer); return; },  const match = /^bytes=(\\d*)-(\\d*)$/.exec(range);,  if (!match) { res.status(416).setHeader("Content-Range", `bytes */${total}`).end(); return; },  const start = match[1] ? Number(match[1]) : Math.max(0, total - Number(match[2] || 1));,  const end = match[2] ? Math.min(total - 1, Number(match[2])) : total - 1;,  if (start > end || start >= total) { res.status(416).setHeader("Content-Range", `bytes */${total}`).end(); return; },  res.status(206);,  res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);,  res.setHeader("Content-Length", end - start + 1);,  res.end(buffer.subarray(start, end + 1));,};,const streamFileWithRanges = (req: Request, res: Response, filePath: string, mimeType: string, downloadName?: string) => {
+const streamBufferWithRanges = (req: Request, res: Response, buffer: Buffer, mimeType: string, downloadName?: string) => {
+  const total = buffer.length;
+  if (!total) { res.status(404).json({ error: "Recorded video is empty." }); return; }
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Content-Type", mimeType);
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  if (downloadName) res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+  const range = req.headers.range;
+  if (!range) { res.setHeader("Content-Length", total); res.status(200).end(buffer); return; }
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+  if (!match) { res.status(416).setHeader("Content-Range", `bytes */${total}`).end(); return; }
+  const start = match[1] ? Number(match[1]) : Math.max(0, total - Number(match[2] || 1));
+  const end = match[2] ? Math.min(total - 1, Number(match[2])) : total - 1;
+  if (start > end || start >= total) { res.status(416).setHeader("Content-Range", `bytes */${total}`).end(); return; }
+  res.status(206);
+  res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
+  res.setHeader("Content-Length", end - start + 1);
+  res.end(buffer.subarray(start, end + 1));
+};
+
+const streamFileWithRanges = (req: Request, res: Response, filePath: string, mimeType: string, downloadName?: string) => {
   if (!fs.existsSync(filePath)) {
     res.status(404).json({ error: "Recorded video file not found." });
     return;
