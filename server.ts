@@ -77,6 +77,29 @@ async function getRemoteVideoUrl(videoId: string): Promise<string | null> {
   return signed.data?.signedUrl || null;
 }
 
+async function getRemoteVideoBuffer(videoId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("interview_videos")
+    .select("storage_path, mime_type")
+    .eq("id", videoId)
+    .maybeSingle();
+  if (error) throw new Error("Supabase video lookup failed: " + error.message);
+  if (!data?.storage_path) return null;
+
+  const { data: file, error: downloadError } = await supabase
+    .storage
+    .from(SUPABASE_VIDEO_BUCKET)
+    .download(data.storage_path);
+  if (downloadError) throw new Error("Supabase video download failed: " + downloadError.message);
+  if (!file) return null;
+
+  const arrayBuffer = await file.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  if (!buffer.length) return null;
+  return { buffer, mimeType: data.mime_type || "video/webm" };
+}
+
 const app = express();
 
 app.use("/api", (req: Request, res: Response, next: any) => {
@@ -1166,6 +1189,24 @@ app.post("/api/interviews/:id/response", async (req: Request, res: Response) => 
     });
   }
 
+  // The interviewer may refresh or the Render process may restart. Persist the
+  // updated session remotely whenever Supabase is configured.
+  if (supabase) {
+    try {
+      await persistInterviewRemotely(interview);
+    } catch (error) {
+      console.error("Remote interview response persistence failed:", error);
+      res.status(503).json({
+        code: "INTERVIEW_RESPONSE_PERSISTENCE_FAILED",
+        error: "The answer was received but could not be synchronized to durable storage. Please retry.",
+        retryable: true,
+      });
+      return;
+    }
+  } else {
+    saveInterviewToDatabase(interview);
+  }
+
   res.json({ success: true, response: responseObj });
 });
 
@@ -1178,7 +1219,23 @@ app.post("/api/interviews/:id/finish", async (req: Request, res: Response) => {
 
   interview.status = "completed";
   interview.completedAt = new Date().toISOString();
-  saveInterviewToDatabase(interview);
+
+  // Keep completion durable across Render restarts.
+  if (supabase) {
+    try {
+      await persistInterviewRemotely(interview);
+    } catch (error) {
+      console.error("Remote interview completion persistence failed:", error);
+      res.status(503).json({
+        code: "INTERVIEW_COMPLETION_PERSISTENCE_FAILED",
+        error: "The interview was completed but could not be synchronized to durable storage. Please retry.",
+        retryable: true,
+      });
+      return;
+    }
+  } else {
+    saveInterviewToDatabase(interview);
+  }
 
   // Synthesize AI Summary Report
   const responsesList = Object.values(interview.responses);
@@ -1939,9 +1996,25 @@ app.post("/api/gemini/transcribe-video", async (req: Request, res: Response) => 
 
   const ai = getGeminiClient();
   const storedVideo = videoId ? getVideoDatabaseRecord(String(videoId)) : null;
-  const mediaBuffer = storedVideo?.originalBuffer;
+  let mediaBuffer = storedVideo?.originalBuffer;
+  let mediaMime = storedVideo?.sourceMimeType || mimeType || "video/webm";
+
+  // Prefer local SQLite, then durable Supabase Storage, then the legacy
+  // browser-supplied base64 fallback. This keeps transcription working after
+  // Render restarts and avoids making the browser resend the entire recording.
+  if (!mediaBuffer && videoId && supabase) {
+    try {
+      const remoteVideo = await getRemoteVideoBuffer(String(videoId));
+      if (remoteVideo) {
+        mediaBuffer = remoteVideo.buffer;
+        mediaMime = remoteVideo.mimeType;
+      }
+    } catch (error) {
+      console.warn("Remote video retrieval for transcription failed:", error);
+    }
+  }
+
   const mediaData = mediaBuffer ? mediaBuffer.toString("base64") : base64Media;
-  const mediaMime = storedVideo?.sourceMimeType || mimeType || "video/webm";
 
   if (ai && mediaData) {
     try {
@@ -2002,7 +2075,10 @@ Analyze the spoken response and return a JSON object with:
   }
 
   res.status(422).json({
-    error: "No accessible interview recording was supplied or transcription failed. No transcript was generated.",
+    code: mediaData ? "TRANSCRIPTION_FAILED" : "VIDEO_NOT_ACCESSIBLE",
+    error: mediaData
+      ? "The recording was accessible, but Gemini could not generate a transcript."
+      : "No accessible interview recording was supplied. The recording may not yet be synchronized to durable storage.",
     transcript: null,
     modelUsed: "none",
   });
