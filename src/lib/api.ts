@@ -31,17 +31,40 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     ...(options.headers as Record<string, string> || {}),
   };
 
-  const response = await fetch(path, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...options,
+      headers,
+    });
+  } catch (networkError: any) {
+    const message = networkError?.message || "The server could not be reached.";
+    throw new Error(
+      `Unable to reach ReqVoice server. Check that the Render service is running and try again. ${message}`
+    );
+  }
 
   if (!response.ok) {
     let errMsg = `Request failed (${response.status})`;
+    let errorPayload: any = null;
     try {
-      const err = await response.json();
-      if (err.error) errMsg = err.error;
+      const raw = await response.text();
+      try {
+        errorPayload = raw ? JSON.parse(raw) : null;
+      } catch {
+        errorPayload = raw ? { error: raw } : null;
+      }
+      if (errorPayload?.error) errMsg = errorPayload.error;
     } catch {}
+
+    const requestId = errorPayload?.requestId;
+    const retryable = errorPayload?.retryable ?? response.status >= 500;
+    const suffix = requestId ? ` (Request ID: ${requestId})` : "";
+    if (response.status >= 500 && !errMsg.toLowerCase().includes("request failed")) {
+      errMsg = `${errMsg}${retryable ? " Please try again shortly." : ""}${suffix}`;
+    } else if (requestId) {
+      errMsg = `${errMsg}${suffix}`;
+    }
 
     // Render restarts clear the server's in-memory authentication map.
     // Remove stale client tokens immediately so the UI does not keep sending
