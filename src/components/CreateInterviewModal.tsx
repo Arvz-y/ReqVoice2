@@ -199,6 +199,8 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
   const [aiPrompt, setAiPrompt] = useState(INTERVIEW_TYPE_DETAILS['Semi-Structured'].defaultPrompt);
   const [questionCount, setQuestionCount] = useState(5);
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [promptVersion, setPromptVersion] = useState(1);
+  const [lastGeneratedPrompt, setLastGeneratedPrompt] = useState('');
 
   // Manual Question Builder State
   const [manualText, setManualText] = useState('');
@@ -221,6 +223,12 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
   const handleSelectInterviewType = (type: InterviewType) => {
     setInterviewType(type);
     setAiPrompt(INTERVIEW_TYPE_DETAILS[type].defaultPrompt);
+    setPromptVersion((v) => v + 1);
+  };
+
+  const handlePromptChange = (value: string) => {
+    setAiPrompt(value);
+    setPromptVersion((v) => v + 1);
   };
 
   // Handler to load the preset questions for currently selected interview type
@@ -246,6 +254,7 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
 
       if (res.questions && res.questions.length > 0) {
         setQuestions(res.questions);
+        setLastGeneratedPrompt(aiPrompt);
       }
     } catch (err: any) {
       setValidationError(`AI generation failed: ${err.message || 'Please check your connection'}`);
@@ -269,6 +278,7 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
         systemType: currentSystem?.type || 'Business Application',
         role: intervieweeRole || 'Stakeholder',
         prompt: aiPrompt,
+        promptVersion,
         count: questionCount,
         interviewType: interviewType,
       });
@@ -351,6 +361,8 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
         intervieweeDept: intervieweeDept.trim() || 'Operations',
         interviewType: interviewType,
         questions,
+        prompt: aiPrompt,
+        promptVersion,
       });
 
       onSuccess(res.interview);
@@ -633,7 +645,7 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
                   <textarea
                     rows={2}
                     value={aiPrompt}
-                    onChange={(e) => setAiPrompt(e.target.value)}
+                    onChange={(e) => handlePromptChange(e.target.value)}
                     placeholder="e.g. Focus on cloud migration downtime, data backup frequency, and third-party API rate limits..."
                     className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
                   />
