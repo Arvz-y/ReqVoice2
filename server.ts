@@ -11,8 +11,8 @@ const app = express();
 const PORT = 3000;
 
 // High limit for audio/video payloads
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
+app.use(express.json({ limit: "200mb" }));
+app.use(express.urlencoded({ limit: "200mb", extended: true }));
 
 // Lazy-initialized Gemini client
 let geminiClient: GoogleGenAI | null = null;
@@ -672,28 +672,38 @@ app.post("/api/interviews/:id/response", (req: Request, res: Response) => {
   const { questionId, responseText, audioDurationSeconds, videoRecording, aiTranscript } = req.body;
   const question = interview.questions.find((q) => q.id === questionId);
 
-  // Process and store video binary in memory & disk if provided
+  // Persist the actual recording before accepting the response. The disk vault is the durable
+  // backing store; videosStore is the fast in-memory cache used for streaming.
   if (videoRecording && videoRecording.id) {
-    if (videoRecording.base64Data) {
-      try {
-        const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64,/, "");
-        const videoBuffer = Buffer.from(cleanBase64, "base64");
-        videosStore.set(videoRecording.id, {
-          id: videoRecording.id,
-          interviewId: interview.id,
-          questionId,
-          mimeType: videoRecording.mimeType || "video/webm",
-          buffer: videoBuffer,
-          durationSeconds: videoRecording.durationSeconds || 0,
-          recordedAt: videoRecording.recordedAt || new Date().toISOString(),
-        });
-        fs.writeFileSync(path.join(userVideosDir, `${videoRecording.id}.webm`), videoBuffer);
-      } catch (err) {
-        console.warn("Could not save video recording to vault:", err);
-      }
-      delete videoRecording.base64Data;
+    if (!videoRecording.base64Data) {
+      res.status(400).json({ error: "The recorded video could not be accessed, so no transcript or response media was stored." });
+      return;
     }
-    videoRecording.videoUrl = `/api/videos/${videoRecording.id}`;
+    try {
+      const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64,/, "");
+      const videoBuffer = Buffer.from(cleanBase64, "base64");
+      if (!videoBuffer.length) throw new Error("Empty video payload");
+      const mimeType = videoRecording.mimeType || "video/webm";
+      const extension = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
+      videosStore.set(videoRecording.id, {
+        id: videoRecording.id,
+        interviewId: interview.id,
+        questionId,
+        mimeType,
+        buffer: videoBuffer,
+        durationSeconds: videoRecording.durationSeconds || 0,
+        recordedAt: videoRecording.recordedAt || new Date().toISOString(),
+      });
+      fs.writeFileSync(path.join(userVideosDir, videoRecording.id + "." + extension), videoBuffer);
+      videoRecording.videoUrl = "/api/videos/" + videoRecording.id;
+      videoRecording.storageStatus = "saved";
+      videoRecording.storagePath = "video_vault/" + videoRecording.id + "." + extension;
+      delete videoRecording.base64Data;
+    } catch (err) {
+      console.warn("Could not save video recording:", err);
+      res.status(500).json({ error: "The video recording could not be saved. No response was stored." });
+      return;
+    }
   }
 
   const responseObj = {
@@ -705,7 +715,7 @@ app.post("/api/interviews/:id/response", (req: Request, res: Response) => {
     responseText: responseText || "",
     audioDurationSeconds: audioDurationSeconds || 0,
     videoRecording,
-    aiTranscript,
+    aiTranscript: (videoRecording?.storageStatus === "saved" && aiTranscript?.transcript?.trim()) ? aiTranscript : undefined,
     createdAt: new Date().toISOString(),
   };
 
@@ -885,28 +895,38 @@ app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
   const { questionId, responseText, audioDurationSeconds, videoRecording, aiTranscript } = req.body;
   const question = interview.questions.find((q) => q.id === questionId);
 
-  // Save video recording to vault & disk
+  // Persist the actual recording before accepting the response. The disk vault is the durable
+  // backing store; videosStore is the fast in-memory cache used for streaming.
   if (videoRecording && videoRecording.id) {
-    if (videoRecording.base64Data) {
-      try {
-        const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64,/, "");
-        const videoBuffer = Buffer.from(cleanBase64, "base64");
-        videosStore.set(videoRecording.id, {
-          id: videoRecording.id,
-          interviewId: interview.id,
-          questionId,
-          mimeType: videoRecording.mimeType || "video/webm",
-          buffer: videoBuffer,
-          durationSeconds: videoRecording.durationSeconds || 0,
-          recordedAt: videoRecording.recordedAt || new Date().toISOString(),
-        });
-        fs.writeFileSync(path.join(userVideosDir, `${videoRecording.id}.webm`), videoBuffer);
-      } catch (err) {
-        console.warn("Could not save interviewee video recording:", err);
-      }
-      delete videoRecording.base64Data;
+    if (!videoRecording.base64Data) {
+      res.status(400).json({ error: "The recorded video could not be accessed, so no transcript or response media was stored." });
+      return;
     }
-    videoRecording.videoUrl = `/api/videos/${videoRecording.id}`;
+    try {
+      const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64,/, "");
+      const videoBuffer = Buffer.from(cleanBase64, "base64");
+      if (!videoBuffer.length) throw new Error("Empty video payload");
+      const mimeType = videoRecording.mimeType || "video/webm";
+      const extension = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
+      videosStore.set(videoRecording.id, {
+        id: videoRecording.id,
+        interviewId: interview.id,
+        questionId,
+        mimeType,
+        buffer: videoBuffer,
+        durationSeconds: videoRecording.durationSeconds || 0,
+        recordedAt: videoRecording.recordedAt || new Date().toISOString(),
+      });
+      fs.writeFileSync(path.join(userVideosDir, videoRecording.id + "." + extension), videoBuffer);
+      videoRecording.videoUrl = "/api/videos/" + videoRecording.id;
+      videoRecording.storageStatus = "saved";
+      videoRecording.storagePath = "video_vault/" + videoRecording.id + "." + extension;
+      delete videoRecording.base64Data;
+    } catch (err) {
+      console.warn("Could not save video recording:", err);
+      res.status(500).json({ error: "The video recording could not be saved. No response was stored." });
+      return;
+    }
   }
 
   const responseObj = {
@@ -918,7 +938,7 @@ app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
     responseText: responseText || "",
     audioDurationSeconds: audioDurationSeconds || 0,
     videoRecording,
-    aiTranscript,
+    aiTranscript: (videoRecording?.storageStatus === "saved" && aiTranscript?.transcript?.trim()) ? aiTranscript : undefined,
     createdAt: new Date().toISOString(),
   };
 
@@ -1019,50 +1039,10 @@ Analyze the spoken response and return a JSON object with:
     }
   }
 
-  // Domain fallback if Gemini key is absent or media parsing was mock
-  const fallbackTranscripts: Record<string, { transcript: string; sentiment: any; score: number; reqs: string[] }> = {
-    workflow: {
-      transcript: "In our daily workflow, we initiate client onboarding by verifying identity documents, cross-checking tax clearance certificates, and submitting records into our staging queue. We need seamless integration so we don't have to duplicate data entry into spreadsheets.",
-      sentiment: "constructive",
-      score: 82,
-      reqs: ["Automated CRM document verification", "Bidirectional ERP spreadsheet synchronization"],
-    },
-    pain_point: {
-      transcript: "The biggest issue we deal with every single morning is application timeout when three or more departments access the same database record simultaneously. We end up getting locking errors and have to manually telephone colleagues to exit screens.",
-      sentiment: "negative",
-      score: 28,
-      reqs: ["Optimistic concurrency record locking", "Real-time presence indicator showing who is viewing the record"],
-    },
-    expectation: {
-      transcript: "Our baseline expectation is zero-latency search with instant auto-complete on customer accounts. Page switches should render in less than 300 milliseconds, and notifications should be pushed via WebSockets rather than requiring page reloads.",
-      sentiment: "positive",
-      score: 91,
-      reqs: ["Sub-300ms SLA for search indexing", "WebSocket push architecture for active alerts"],
-    },
-    limitation: {
-      transcript: "The current system doesn't support bulk operations or batch approvals. If we have seventy invoices to authorize before the bank cutoff at 4 PM, a supervisor has to click into each single invoice individually. It creates massive stress and delayed payments.",
-      sentiment: "constructive",
-      score: 55,
-      reqs: ["Bulk multi-select and batch authorization workflow", "Configurable automated cutoff threshold triggers"],
-    },
-    desired_feature: {
-      transcript: "Top three desired features would be: first, an automated audit trail exportable to CSV; second, customizable role-based dashboards; and third, mobile authorization with biometric Face ID or fingerprint support so managers can approve critical orders while traveling.",
-      sentiment: "positive",
-      score: 95,
-      reqs: ["One-click CSV/PDF audit trail exporter", "Biometric mobile approval portal"],
-    },
-  };
-
-  const selectedFallback = fallbackTranscripts[category || "workflow"] || fallbackTranscripts.workflow;
-
-  res.json({
-    transcript: selectedFallback.transcript,
-    confidence: 97,
-    sentiment: selectedFallback.sentiment,
-    sentimentScore: selectedFallback.score,
-    keyRequirements: selectedFallback.reqs,
-    modelUsed: "gemini-3.5-transcribe",
-    generatedAt: new Date().toISOString(),
+  res.status(422).json({
+    error: "No accessible interview recording was supplied or transcription failed. No transcript was generated.",
+    transcript: null,
+    modelUsed: "none",
   });
 });
 
@@ -1317,9 +1297,14 @@ app.get("/api/videos/:id", (req: Request, res: Response) => {
     mimeType = stored.mimeType || "video/webm";
   } else {
     // Check disk storage in userVideosDir
-    const diskPath = path.join(userVideosDir, `${videoId}.webm`);
-    if (fs.existsSync(diskPath)) {
-      videoBuffer = fs.readFileSync(diskPath);
+    const candidates = ["webm", "mp4", "ogg"];
+    for (const ext of candidates) {
+      const diskPath = path.join(userVideosDir, videoId + "." + ext);
+      if (fs.existsSync(diskPath)) {
+        videoBuffer = fs.readFileSync(diskPath);
+        mimeType = ext === "mp4" ? "video/mp4" : ext === "ogg" ? "video/ogg" : "video/webm";
+        break;
+      }
     }
   }
 
@@ -1363,9 +1348,14 @@ app.get("/api/videos/:id/download", (req: Request, res: Response) => {
   if (stored && stored.buffer) {
     videoBuffer = stored.buffer;
   } else {
-    const diskPath = path.join(userVideosDir, `${videoId}.webm`);
-    if (fs.existsSync(diskPath)) {
-      videoBuffer = fs.readFileSync(diskPath);
+    const candidates = ["webm", "mp4", "ogg"];
+    for (const ext of candidates) {
+      const diskPath = path.join(userVideosDir, videoId + "." + ext);
+      if (fs.existsSync(diskPath)) {
+        videoBuffer = fs.readFileSync(diskPath);
+        mimeType = ext === "mp4" ? "video/mp4" : ext === "ogg" ? "video/ogg" : "video/webm";
+        break;
+      }
     }
   }
 
