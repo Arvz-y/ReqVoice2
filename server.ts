@@ -362,7 +362,7 @@ const findOriginalVideoPath = (videoId: string): { path: string; mimeType: strin
   const safeId = videoId.replace(/[^a-zA-Z0-9_-]/g, "");
   if (!safeId || safeId !== videoId) return null;
 
-  for (const extension of ["webm", "mp4", "ogg"]) {
+  for (const extension of ["mp4", "webm", "ogg"]) {
     const filePath = getVideoFilePath(safeId, extension);
     if (fs.existsSync(filePath)) {
       const mimeType =
@@ -819,11 +819,23 @@ app.post("/api/interviews/:id/response", (req: Request, res: Response) => {
         durationSeconds: videoRecording.durationSeconds || 0,
         recordedAt: videoRecording.recordedAt || new Date().toISOString(),
       });
-      fs.writeFileSync(path.join(userVideosDir, videoRecording.id + "." + extension), videoBuffer);
+      const originalPath = path.join(userVideosDir, videoRecording.id + "." + extension);
+      fs.writeFileSync(originalPath, videoBuffer);
+
+      // Convert WebM/other browser-native recordings immediately so every
+      // completed submission has a standard MP4 artifact for download and
+      // external/device playback. The original capture remains preserved.
+      let deliveryExtension = extension;
+      if (extension !== "mp4") {
+        const compatibleMp4 = await transcodeToCompatibleMp4(videoRecording.id, originalPath);
+        if (compatibleMp4) deliveryExtension = "mp4";
+      }
+
       videoRecording.videoUrl = "/api/videos/" + videoRecording.id + "/playback";
       videoRecording.storageStatus = "saved";
-      videoRecording.storagePath = "video_vault/" + videoRecording.id + "." + extension;
-        delete videoRecording.base64Data;
+      videoRecording.storagePath = "video_vault/" + videoRecording.id + "." + deliveryExtension;
+      videoRecording.mimeType = deliveryExtension === "mp4" ? "video/mp4" : mimeType;
+      delete videoRecording.base64Data;
       } catch (err) {
         console.warn("Could not save video recording:", err);
         res.status(500).json({ error: "The video recording could not be saved. No response was stored." });
@@ -1056,10 +1068,19 @@ app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
         durationSeconds: videoRecording.durationSeconds || 0,
         recordedAt: videoRecording.recordedAt || new Date().toISOString(),
       });
-      fs.writeFileSync(path.join(userVideosDir, videoRecording.id + "." + extension), videoBuffer);
-      videoRecording.videoUrl = "/api/videos/" + videoRecording.id;
+      const originalPath = path.join(userVideosDir, videoRecording.id + "." + extension);
+      fs.writeFileSync(originalPath, videoBuffer);
+
+      let deliveryExtension = extension;
+      if (extension !== "mp4") {
+        const compatibleMp4 = await transcodeToCompatibleMp4(videoRecording.id, originalPath);
+        if (compatibleMp4) deliveryExtension = "mp4";
+      }
+
+      videoRecording.videoUrl = "/api/videos/" + videoRecording.id + "/playback";
       videoRecording.storageStatus = "saved";
-      videoRecording.storagePath = "video_vault/" + videoRecording.id + "." + extension;
+      videoRecording.storagePath = "video_vault/" + videoRecording.id + "." + deliveryExtension;
+      videoRecording.mimeType = deliveryExtension === "mp4" ? "video/mp4" : mimeType;
       delete videoRecording.base64Data;
     } catch (err) {
       console.warn("Could not save video recording:", err);
