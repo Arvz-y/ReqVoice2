@@ -14,15 +14,24 @@ const PORT = 3000;
 app.use(express.json({ limit: "200mb" }));
 app.use(express.urlencoded({ limit: "200mb", extended: true }));
 
-// Lazy-initialized Gemini client
+// Lazy-initialized Gemini client.
+// AI Studio normally exposes GEMINI_API_KEY, but support common server-side
+// aliases as well so question generation does not fail just because the secret
+// was stored under another supported name.
 let geminiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI | null {
-  if (!geminiClient && process.env.GEMINI_API_KEY) {
+  const apiKey =
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY ||
+    process.env.API_KEY;
+
+  if (!geminiClient && apiKey) {
     geminiClient = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+      apiKey,
       httpOptions: {
         headers: {
-          "User-Agent": "aistudio-build",
+          "User-Agent": "ReqVoice2/AI-Question-Generator",
         },
       },
     });
@@ -1061,6 +1070,11 @@ app.post("/api/gemini/suggest-questions", async (req: Request, res: Response) =>
   const ai = getGeminiClient();
   const numQuestions = Math.min(10, Math.max(1, Number(count) || 5));
 
+  if (!requestedPrompt) {
+    res.status(400).json({ error: "An interview prompt is required before generating questions.", promptVersion: revision });
+    return;
+  }
+
   const interviewType: "Structured" | "Semi-Structured" | "Unstructured" =
     rawInterviewType === "Structured" ? "Structured" :
     rawInterviewType === "Unstructured" ? "Unstructured" :
@@ -1134,6 +1148,7 @@ Format as JSON array of objects:
       const modelCandidates = [
         process.env.GEMINI_QUESTION_MODEL,
         "gemini-2.5-flash",
+        "gemini-2.0-flash",
         "gemini-2.5-pro",
       ].filter(Boolean) as string[];
       let response: any;
@@ -1173,11 +1188,19 @@ Format as JSON array of objects:
 
   // Do not silently substitute generic questions. A successful response must be
   // generated from the current prompt by an AI model.
+  const hasApiKey = Boolean(
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY ||
+    process.env.API_KEY
+  );
   res.status(503).json({
-    error: "AI question generation is unavailable. No generic questions were substituted. Please verify the Gemini API configuration and try again.",
+    error: hasApiKey
+      ? "AI question generation failed after trying the configured Gemini models. No generic questions were substituted. Please try again or check the server model configuration."
+      : "Gemini API credentials are not configured on the server. Set GEMINI_API_KEY in the deployment Secrets panel. No generic questions were substituted.",
     promptVersion: revision,
   });
-  res.json({ questions: baseFallback.slice(0, numQuestions) });
+  return;
 });
 
 // 6.5 User Activity Feed (Account-Isolated)
