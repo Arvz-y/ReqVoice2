@@ -50,7 +50,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     try {
       const raw = await response.text();
       const contentType = response.headers.get("content-type") || "";
-      const looksLikeHtml = /text\\/html/i.test(contentType) || /^\\s*<!doctype html|^\\s*<html[\\s>]/i.test(raw);
+      const looksLikeHtml = /text\/html/i.test(contentType) || /^\s*<!doctype html|^\s*<html[\s>]/i.test(raw);
       if (looksLikeHtml) {
         errorPayload = {
           error: `The server returned an HTML page instead of a JSON API response (HTTP ${response.status}). The API endpoint may be unavailable or the server may have restarted.`,
