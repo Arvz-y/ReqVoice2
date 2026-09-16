@@ -674,6 +674,20 @@ function sanitizeUser(user: StoredUser): Omit<StoredUser, "password"> {
   const { password, ...safeUser } = user;
   return safeUser;
 }
+function sanitizeUser(user: StoredUser): Omit<StoredUser, "password"> {
+  const { password, ...safeUser } = user;
+  return safeUser;
+}
+
+function getAuthUser(req: Request): StoredUser | null {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return null;
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const userId = verifyPersistentAuthToken(token);
+  if (!userId) return null;
+  return usersDb.find((u) => u.id === userId) || null;
+}
+
 async function persistUserRemotely(user: StoredUser): Promise<void> {
   if (!supabase) return;
   const { error } = await supabase.from("app_users").upsert({ id: user.id, name: user.name, username: user.username, email: user.email, password: user.password, role: user.role, department: user.department, avatar_url: user.avatarUrl, bio: user.bio, is_first_time: user.isFirstTime, has_completed_tutorial: user.hasCompletedTutorial, created_at: user.createdAt }, { onConflict: "id" });
