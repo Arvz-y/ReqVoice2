@@ -1027,6 +1027,76 @@ app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
   res.json({ success: true, response: responseObj, isComplete });
 });
 
+// Video playback endpoints. These are independent from transcription so a
+// recorded answer remains playable even when AI analysis fails.
+const resolveStoredVideo = (videoId: string): { buffer: Buffer; mimeType: string } | null => {
+  const cached = videosStore.get(videoId);
+  if (cached?.buffer?.length) {
+    return { buffer: cached.buffer, mimeType: cached.mimeType || "video/webm" };
+  }
+
+  const safeId = videoId.replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!safeId || safeId !== videoId) return null;
+
+  for (const extension of ["webm", "mp4", "ogg"]) {
+    const filePath = path.join(userVideosDir, safeId + "." + extension);
+    if (fs.existsSync(filePath)) {
+      const mimeType = extension === "mp4" ? "video/mp4" : extension === "ogg" ? "video/ogg" : "video/webm";
+      return { buffer: fs.readFileSync(filePath), mimeType };
+    }
+  }
+  return null;
+};
+
+const streamStoredVideo = (req: Request, res: Response, download = false) => {
+  const stored = resolveStoredVideo(req.params.id);
+  if (!stored) {
+    res.status(404).json({ error: "Recorded video not found." });
+    return;
+  }
+
+  const total = stored.buffer.length;
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Content-Type", stored.mimeType);
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  if (download) {
+    res.setHeader("Content-Disposition", `attachment; filename="reqvoice_recording_${req.params.id}.webm"`);
+  }
+
+  const range = req.headers.range;
+  if (!range) {
+    res.setHeader("Content-Length", total);
+    res.status(200).end(stored.buffer);
+    return;
+  }
+
+  const match = /^bytes=(\\d*)-(\\d*)$/.exec(range);
+  if (!match) {
+    res.status(416).setHeader("Content-Range", `bytes */${total}`).end();
+    return;
+  }
+
+  const start = match[1] ? Number(match[1]) : Math.max(0, total - Number(match[2] || 1));
+  const end = match[2] ? Math.min(total - 1, Number(match[2])) : total - 1;
+  if (start > end || start >= total) {
+    res.status(416).setHeader("Content-Range", `bytes */${total}`).end();
+    return;
+  }
+
+  res.status(206);
+  res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
+  res.setHeader("Content-Length", end - start + 1);
+  res.end(stored.buffer.subarray(start, end + 1));
+};
+
+app.get("/api/videos/:id", (req: Request, res: Response) => {
+  streamStoredVideo(req, res);
+});
+
+app.get("/api/videos/:id/download", (req: Request, res: Response) => {
+  streamStoredVideo(req, res, true);
+});
+
 // 5. AI Video & Audio Transcription Endpoint using Gemini API
 app.post("/api/gemini/transcribe-video", async (req: Request, res: Response) => {
   const { base64Media, mimeType, questionText, category, durationSeconds } = req.body;
