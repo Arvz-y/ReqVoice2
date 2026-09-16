@@ -149,6 +149,20 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ interviews, system
 
   const selectedSystem = systems.find(s => s.id === systemId);
 
+  const [demoLoading, setDemoLoading] = useState(false);
+  const [demoMessage, setDemoMessage] = useState('');
+
+  const generateDemo = async () => {
+    setDemoLoading(true); setDemoMessage('');
+    try {
+      const result = await api.interviews.generateDemoDataset();
+      setDemoMessage(result.created > 0 ? `Generated ${result.created} demo interviews with synthetic answers.` : 'Demo dataset already exists. No duplicates were created.');
+      window.location.reload();
+    } catch (e: any) {
+      setDemoMessage(e?.message || 'Demo dataset generation failed.');
+    } finally { setDemoLoading(false); }
+  };
+
   const generateAI = async () => {
     if (!systemId) return;
     setLoadingAI(true); setAiError('');
@@ -202,7 +216,11 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ interviews, system
           <select value={systemId} onChange={e => setSystemId(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none">
             {availableSystems.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
-          <button onClick={generateAI} disabled={loadingAI || !systemId} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-500 text-white text-xs font-semibold disabled:opacity-50">
+          <button onClick={generateDemo} disabled={demoLoading} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-500/30 text-emerald-300 text-xs disabled:opacity-50" title="Creates synthetic interviews and answers for testing">
+            {demoLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+            {demoLoading ? 'Generating…' : 'Generate Demo Data'}
+          </button>
+          {generateAI disabled={loadingAI || !systemId} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-500 text-white text-xs font-semibold disabled:opacity-50">
             {loadingAI ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
             {loadingAI ? 'Analyzing…' : 'Analyze with AI'}
           </button>
@@ -210,6 +228,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ interviews, system
             <Download className="w-3.5 h-3.5" /> Export
           </button>
         </div>
+        {demoMessage && <div className="text-[10px] text-emerald-300 lg:text-right">{demoMessage}</div>}
       </div>
 
       {selectedSystem && (
