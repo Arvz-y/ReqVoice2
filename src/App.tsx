@@ -8,6 +8,7 @@ import {
   Bot,
   Smartphone,
   MessageSquare,
+  Activity,
 } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
@@ -23,6 +24,7 @@ import { AuthScreen } from './components/AuthScreen';
 import { TutorialModal } from './components/TutorialModal';
 import { ProfileModal } from './components/ProfileModal';
 import { AIChatAssistant } from './components/AIChatAssistant';
+import { AnalyticsView } from './components/AnalyticsView';
 import { MobileExperienceMode } from './components/MobileExperienceMode';
 import { api } from './lib/api';
 import { SystemUnderStudy, InterviewSession, UserProfile } from './types';
@@ -214,6 +216,7 @@ export function App() {
     { id: 'systems', label: 'Systems', icon: Layers },
     { id: 'live', label: 'Monitor', icon: Mic },
     { id: 'reports', label: 'Reports', icon: FileText },
+    { id: 'analytics', label: 'Analytics', icon: Activity },
     { id: 'database', label: 'Database', icon: Database },
     { id: 'chat', label: 'AI Chat', icon: Bot },
     { id: 'mobile', label: 'Mobile App', icon: Smartphone },
@@ -287,6 +290,8 @@ export function App() {
               </div>
             )
           )}
+
+          {activeTab === 'analytics' && <AnalyticsView interviews={interviews} />}
 
           {activeTab === 'reports' && (
             <ReportsView
