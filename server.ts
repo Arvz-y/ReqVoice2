@@ -919,7 +919,7 @@ app.post("/api/interviews", (req: Request, res: Response) => {
 });
 
 app.post("/api/interviews/:id/response", async (req: Request, res: Response) => {
-  const interview = interviewsDb.find((i) => i.id === req.params.id);
+  const interview = loadInterviewsFromDatabase().find((i) => i.id === req.params.id);
   if (!interview) {
     res.status(404).json({ error: "Interview not found" });
     return;
@@ -1220,7 +1220,7 @@ app.post(
   "/api/share/:token/video",
   express.raw({ type: ["video/*", "application/octet-stream"], limit: "20mb" }),
   async (req: Request, res: Response) => {
-    const interview = interviewsDb.find((i) => i.shareToken === req.params.token);
+    const interview = loadInterviewsFromDatabase().find((i) => i.shareToken === req.params.token);
     if (!interview) {
       res.status(404).json({ error: "Interview session expired or not found." });
       return;
@@ -1394,7 +1394,7 @@ app.post(
   }
 );
 app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
-  const interview = interviewsDb.find((i) => i.shareToken === req.params.token);
+  const interview = loadInterviewsFromDatabase().find((i) => i.shareToken === req.params.token);
   if (!interview) {
     res.status(404).json({ error: "Interview session expired or not found" });
     return;
