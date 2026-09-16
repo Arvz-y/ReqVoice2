@@ -277,6 +277,15 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
           ? Math.max(0, (Date.now() - recordingStartedAtRef.current) / 1000)
           : recordingSeconds;
         const finalDuration = Math.max(1, Math.round(measuredDuration));
+        if (completeBlob.size < 1024) {
+          console.error('Recording produced an invalidly small media file:', completeBlob.size, mimeType);
+          setCameraError('The recording was incomplete. Please record again and wait until the timer is running before stopping.');
+          setRecordedBlob(null);
+          setRecordedVideoUrl(null);
+          setIsRecording(false);
+          return;
+        }
+
         setRecordingSeconds(finalDuration);
         setRecordedBlob(completeBlob);
 
@@ -325,10 +334,18 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
     }
   };
 
-  // Stop recording
+  // Stop recording only after asking MediaRecorder to flush its final chunk.
+  // Without requestData(), some browsers can leave the last media chunk pending,
+  // producing a tiny/invalid WebM (for example a few bytes) on upload.
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
+    const recorder = mediaRecorderRef.current;
+    if (recorder && isRecording) {
+      try {
+        if (recorder.state === 'recording') recorder.requestData();
+      } catch (err) {
+        console.warn('Unable to flush final recording chunk:', err);
+      }
+      recorder.stop();
       setIsRecording(false);
     }
     if (timerIntervalRef.current) {
@@ -513,7 +530,13 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
     try {
       let base64Media = '';
       if (recordedBlob) {
+        if (recordedBlob.size < 1024) {
+          throw new Error('The recorded video is incomplete or empty. Please record the answer again.');
+        }
         base64Media = await blobToBase64(recordedBlob);
+        if (!base64Media || base64Media.length < 1000) {
+          throw new Error('The recorded video could not be encoded correctly. Please record the answer again.');
+        }
       }
 
       // Evidence rule: AI transcript data is created only from an actual recording.
