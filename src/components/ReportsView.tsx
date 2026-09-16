@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { InterviewSession, SystemUnderStudy, InterviewResponse } from '../types';
 import { api } from '../lib/api';
-import { getVideoBlobUrl } from '../lib/videoStorage';
+import { getVideoBlobUrl, blobToBase64 } from '../lib/videoStorage';
 import { AnswerVideoPlayer } from './AnswerVideoPlayer';
 
 interface ReportsViewProps {
@@ -108,7 +108,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         return;
       }
 
+      const mediaUrl = response.videoRecording.videoUrl || api.videos.getUrl(response.videoRecording.id);
+      const mediaResponse = await fetch(mediaUrl);
+      if (!mediaResponse.ok) throw new Error('The recorded video is not accessible. No transcript was generated.');
+      const mediaBlob = await mediaResponse.blob();
+      if (!mediaBlob.size) throw new Error('The recorded video is empty. No transcript was generated.');
+      const base64Media = await blobToBase64(mediaBlob);
       const res = await api.gemini.transcribeVideo({
+        base64Media,
+        mimeType: mediaBlob.type || response.videoRecording.mimeType || 'video/webm',
         questionText: q?.questionText || 'Requirements inquiry',
         category: q?.category,
         durationSeconds: response.videoRecording.durationSeconds,
