@@ -31,6 +31,20 @@ async function getRemoteInterviewByShareToken(token: string): Promise<StoredInte
   return data?.session_json as StoredInterview | undefined;
 }
 
+async function getRemoteInterviewById(id: string): Promise<StoredInterview | undefined> {
+  if (!supabase) return undefined;
+  const { data, error } = await supabase.from("interview_sessions").select("session_json").eq("id", id).maybeSingle();
+  if (error) throw new Error("Supabase interview lookup failed: " + error.message);
+  return data?.session_json as StoredInterview | undefined;
+}
+
+async function getRemoteInterviewsForUser(userId: string): Promise<StoredInterview[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.from("interview_sessions").select("session_json").eq("user_id", userId).order("updated_at", { ascending: false });
+  if (error) throw new Error("Supabase interview list failed: " + error.message);
+  return (data || []).map((row: any) => row.session_json as StoredInterview).filter(Boolean);
+}
+
 async function ensureSupabaseVideoBucket(): Promise<void> {
   if (!supabase) return;
   const { data: buckets, error: listError } = await supabase.storage.listBuckets();
@@ -907,23 +921,23 @@ app.delete("/api/systems/:id", (req: Request, res: Response) => {
 });
 
 // 3. Interviews routes (Account-Isolated)
-app.get("/api/interviews", (req: Request, res: Response) => {
+app.get("/api/interviews", async (req: Request, res: Response) => {
   const user = getAuthUser(req);
   if (!user) {
     res.json({ interviews: [] });
     return;
   }
   const { systemId } = req.query;
-  let list = interviewsDb.filter((i) => i.userId === user.id);
+  let list = supabase ? await getRemoteInterviewsForUser(user.id) : interviewsDb.filter((i) => i.userId === user.id);
   if (systemId) {
     list = list.filter((i) => i.systemId === systemId);
   }
   res.json({ interviews: list });
 });
 
-app.get("/api/interviews/:id", (req: Request, res: Response) => {
+app.get("/api/interviews/:id", async (req: Request, res: Response) => {
   const user = getAuthUser(req);
-  const interview = findPersistedInterviewById(req.params.id);
+  const interview = (supabase ? await getRemoteInterviewById(req.params.id) : undefined) || findPersistedInterviewById(req.params.id);
   if (!interview) {
     res.status(404).json({ error: "Interview record not found" });
     return;
