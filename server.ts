@@ -1175,6 +1175,7 @@ app.post(
     const durationSeconds = Number(req.headers["x-duration-seconds"] || 0) || 0;
     const question = interview.questions.find((q) => q.id === questionId);
     if (!question || !videoId) { res.status(400).json({ error: "Video upload is missing a valid question or video ID." }); return; }
+    if (!/^[a-zA-Z0-9_-]+$/.test(videoId)) { res.status(400).json({ error: "The video ID contains invalid characters." }); return; }
     const videoBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || []);
     if (videoBuffer.length < 1024) { res.status(422).json({ code: "VIDEO_TOO_SMALL", error: `The recording is incomplete (${videoBuffer.length} bytes received). Please record again.` }); return; }
     const detected = detectVideoContainer(videoBuffer);
