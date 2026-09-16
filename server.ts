@@ -7,8 +7,61 @@ import { createServer as createViteServer } from "vite";
 import { spawn } from "child_process";
 import ffmpegPath from "ffmpeg-static";
 import { DatabaseSync } from "node:sqlite";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 dotenv.config();
+
+const supabaseUrl = process.env.SUPABASE_URL || "";
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const supabase: SupabaseClient | null = supabaseUrl && supabaseServiceRoleKey
+  ? createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
+  : null;
+const SUPABASE_VIDEO_BUCKET = process.env.SUPABASE_VIDEO_BUCKET || "interview-videos";
+
+async function persistInterviewRemotely(interview: StoredInterview): Promise<void> {
+  if (!supabase) return;
+  const { error } = await supabase.from("interview_sessions").upsert({ id: interview.id, user_id: interview.userId, system_id: interview.systemId, share_token: interview.shareToken, session_json: interview, updated_at: new Date().toISOString() }, { onConflict: "id" });
+  if (error) throw new Error("Supabase interview session save failed: " + error.message);
+}
+
+async function getRemoteInterviewByShareToken(token: string): Promise<StoredInterview | undefined> {
+  if (!supabase) return undefined;
+  const { data, error } = await supabase.from("interview_sessions").select("session_json").eq("share_token", token).maybeSingle();
+  if (error) throw new Error("Supabase interview lookup failed: " + error.message);
+  return data?.session_json as StoredInterview | undefined;
+}
+
+async function ensureSupabaseVideoBucket(): Promise<void> {
+  if (!supabase) return;
+  const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+  if (listError) throw new Error("Supabase Storage bucket check failed: " + listError.message);
+  if (!buckets?.some((b) => b.name === SUPABASE_VIDEO_BUCKET)) {
+    const { error } = await supabase.storage.createBucket(SUPABASE_VIDEO_BUCKET, { public: false, fileSizeLimit: "50MB" });
+    if (error && !/already exists/i.test(error.message)) throw new Error("Supabase Storage bucket creation failed: " + error.message);
+  }
+}
+
+async function uploadVideoRemotely(args: { interviewId: string; questionId: string; videoId: string; buffer: Buffer; mimeType: string; durationSeconds: number; recordedAt: string }): Promise<string> {
+  if (!supabase) throw new Error("Supabase is not configured");
+  await ensureSupabaseVideoBucket();
+  const extension = args.mimeType.includes("mp4") ? "mp4" : args.mimeType.includes("ogg") ? "ogg" : "webm";
+  const storagePath = args.interviewId + "/" + args.videoId + "." + extension;
+  const { error: uploadError } = await supabase.storage.from(SUPABASE_VIDEO_BUCKET).upload(storagePath, args.buffer, { contentType: args.mimeType, upsert: true, cacheControl: "3600" });
+  if (uploadError) throw new Error("Supabase video upload failed: " + uploadError.message);
+  const { error: rowError } = await supabase.from("interview_videos").upsert({ id: args.videoId, interview_id: args.interviewId, question_id: args.questionId, storage_path: storagePath, mime_type: args.mimeType, duration_seconds: args.durationSeconds, recorded_at: args.recordedAt }, { onConflict: "id" });
+  if (rowError) throw new Error("Supabase video metadata save failed: " + rowError.message);
+  return storagePath;
+}
+
+async function getRemoteVideoUrl(videoId: string): Promise<string | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from("interview_videos").select("storage_path").eq("id", videoId).maybeSingle();
+  if (error) throw new Error("Supabase video lookup failed: " + error.message);
+  if (!data?.storage_path) return null;
+  const signed = await supabase.storage.from(SUPABASE_VIDEO_BUCKET).createSignedUrl(data.storage_path, 60 * 60 * 6);
+  if (signed.error) throw new Error("Supabase video playback URL failed: " + signed.error.message);
+  return signed.data?.signedUrl || null;
+}
 
 const app = express();
 
@@ -882,7 +935,7 @@ app.get("/api/interviews/:id", (req: Request, res: Response) => {
   res.json({ interview });
 });
 
-app.post("/api/interviews", (req: Request, res: Response) => {
+app.post("/api/interviews", async (req: Request, res: Response) => {
   try {
     const currentUser = getAuthUser(req);
   if (!currentUser) {
@@ -1222,7 +1275,7 @@ app.delete("/api/interviews/:id", (req: Request, res: Response) => {
 
 // 4. Public Share Portal for Interviewee
 app.get("/api/share/:token", (req: Request, res: Response) => {
-  const interview = findPersistedInterviewByShareToken(req.params.token);
+  const interview = (supabase ? await getRemoteInterviewByShareToken(req.params.token) : undefined) || findPersistedInterviewByShareToken(req.params.token);
   if (!interview) {
     res.status(404).json({ error: "This interview link is either invalid, expired, or has been deactivated." });
     return;
