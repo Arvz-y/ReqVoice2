@@ -1274,7 +1274,7 @@ app.delete("/api/interviews/:id", (req: Request, res: Response) => {
 });
 
 // 4. Public Share Portal for Interviewee
-app.get("/api/share/:token", (req: Request, res: Response) => {
+app.get("/api/share/:token", async (req: Request, res: Response) => {
   const interview = (supabase ? await getRemoteInterviewByShareToken(req.params.token) : undefined) || findPersistedInterviewByShareToken(req.params.token);
   if (!interview) {
     res.status(404).json({ error: "This interview link is either invalid, expired, or has been deactivated." });
@@ -1421,6 +1421,13 @@ app.post(
         originalBuffer: completeVideoBuffer, deliveryMimeType: detected.mimeType,
         deliveryBuffer: null, storagePath: originalPath, durationSeconds, recordedAt,
       });
+      if (supabase) {
+        await uploadVideoRemotely({
+          interviewId: interview.id, questionId, videoId,
+          buffer: completeVideoBuffer, mimeType: detected.mimeType,
+          durationSeconds, recordedAt,
+        });
+      }
 
       const savedRecord = getVideoDatabaseRecord(videoId);
       if (!savedRecord || savedRecord.interviewId !== interview.id ||
@@ -1601,6 +1608,12 @@ app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
     }
   }
 
+  if (supabase) {
+    await persistInterviewRemotely(interview);
+  } else {
+    saveInterviewToDatabase(interview);
+  }
+
   res.json({ success: true, response: responseObj, isComplete });
 });
 
@@ -1689,7 +1702,18 @@ const resolveStoredVideo = (videoId: string): { buffer: Buffer; mimeType: string
   return { buffer: fs.readFileSync(original.path), mimeType: original.mimeType };
 };
 
-const streamStoredVideo = (req: Request, res: Response, download = false) => {
+const streamStoredVideo = async (req: Request, res: Response, download = false) => {
+  if (supabase) {
+    try {
+      const signedUrl = await getRemoteVideoUrl(req.params.id);
+      if (signedUrl) {
+        res.redirect(307, signedUrl);
+        return;
+      }
+    } catch (error: any) {
+      console.error("Remote video playback failed:", error);
+    }
+  }
   const stored = resolveStoredVideo(req.params.id);
   if (!stored) {
     res.status(404).json({ error: "Recorded video not found." });
