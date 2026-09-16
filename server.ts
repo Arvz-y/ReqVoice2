@@ -1226,28 +1226,111 @@ app.get("/api/share/:token", (req: Request, res: Response) => {
 // Binary video upload. The browser sends the Blob directly instead of embedding it in JSON/base64.
 app.post(
   "/api/share/:token/video",
-  express.raw({ type: ["video/*", "application/octet-stream"], limit: "250mb" }),
+  express.raw({ type: ["video/*", "application/octet-stream"], limit: "10mb" }),
   async (req: Request, res: Response) => {
     const interview = interviewsDb.find((i) => i.shareToken === req.params.token);
-    if (!interview) { res.status(404).json({ error: "Interview session expired or not found." }); return; }
+    if (!interview) {
+      res.status(404).json({ error: "Interview session expired or not found." });
+      return;
+    }
+
     const questionId = String(req.headers["x-question-id"] || "");
     const videoId = String(req.headers["x-video-id"] || "");
     const durationSeconds = Number(req.headers["x-duration-seconds"] || 0) || 0;
+    const uploadOffset = Math.max(0, Number(req.headers["x-upload-offset"] || 0) || 0);
+    const uploadTotal = Math.max(0, Number(req.headers["x-upload-total"] || 0) || 0);
+    const uploadFinal = String(req.headers["x-upload-final"] || "").toLowerCase() === "true";
+
     const question = interview.questions.find((q) => q.id === questionId);
-    if (!question || !videoId) { res.status(400).json({ error: "Video upload is missing a valid question or video ID." }); return; }
-    if (!/^[a-zA-Z0-9_-]+$/.test(videoId)) { res.status(400).json({ error: "The video ID contains invalid characters." }); return; }
-    const videoBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || []);
-    if (videoBuffer.length < 1024) { res.status(422).json({ code: "VIDEO_TOO_SMALL", error: `The recording is incomplete (${videoBuffer.length} bytes received). Please record again.` }); return; }
-    const detected = detectVideoContainer(videoBuffer);
-    if (!detected) { res.status(422).json({ code: "VIDEO_CONTAINER_INVALID", error: "The recording is not a recognized MP4, WebM, or Ogg media container." }); return; }
-    const recordedAt = new Date().toISOString();
-    const originalPath = getVideoFilePath(videoId, detected.extension);
+    if (!question || !videoId) {
+      res.status(400).json({ error: "Video upload is missing a valid question or video ID." });
+      return;
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(videoId)) {
+      res.status(400).json({ error: "The video ID contains invalid characters." });
+      return;
+    }
+
+    const chunk = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || []);
+    if (!chunk.length) {
+      res.status(422).json({ code: "VIDEO_CHUNK_EMPTY", error: "The uploaded video chunk is empty." });
+      return;
+    }
+    if (chunk.length > 10 * 1024 * 1024) {
+      res.status(413).json({ code: "VIDEO_CHUNK_TOO_LARGE", error: "The video chunk is too large. Please retry the upload." });
+      return;
+    }
+
+    const uploadDir = path.join(userVideosDir, ".uploads");
+    fs.mkdirSync(uploadDir, { recursive: true });
+    const tempPath = path.join(uploadDir, videoId + ".upload");
+
     try {
-      fs.writeFileSync(originalPath, videoBuffer);
-      if (fs.statSync(originalPath).size !== videoBuffer.length) throw new Error("The complete video payload was not written to storage.");
-      // Commit the original bytes to SQLite BEFORE any transcoding work.
-      // This keeps media persistence independent from FFmpeg and prevents
-      // a long conversion from turning a successful upload into a timeout.
+      if (uploadOffset === 0) {
+        try { fs.unlinkSync(tempPath); } catch {}
+      }
+
+      const currentSize = fs.existsSync(tempPath) ? fs.statSync(tempPath).size : 0;
+      if (currentSize !== uploadOffset) {
+        res.status(409).json({
+          code: "VIDEO_UPLOAD_OFFSET_MISMATCH",
+          error: "The upload position no longer matches the server. Please restart the video upload.",
+          expectedOffset: currentSize,
+        });
+        return;
+      }
+
+      fs.appendFileSync(tempPath, chunk);
+      const receivedBytes = fs.statSync(tempPath).size;
+
+      if (!uploadFinal) {
+        res.status(200).json({
+          success: true,
+          complete: false,
+          videoId,
+          receivedBytes,
+          totalBytes: uploadTotal || undefined,
+        });
+        return;
+      }
+
+      if (uploadTotal && receivedBytes !== uploadTotal) {
+        res.status(409).json({
+          code: "VIDEO_UPLOAD_INCOMPLETE",
+          error: `The complete recording has not reached the server yet (${receivedBytes} of ${uploadTotal} bytes).`,
+          receivedBytes,
+          totalBytes: uploadTotal,
+        });
+        return;
+      }
+
+      if (receivedBytes < 1024) {
+        res.status(422).json({
+          code: "VIDEO_TOO_SMALL",
+          error: `The recording is incomplete (${receivedBytes} bytes received). Please record again.`,
+        });
+        return;
+      }
+
+      const videoBuffer = fs.readFileSync(tempPath);
+      const detected = detectVideoContainer(videoBuffer);
+      if (!detected) {
+        res.status(422).json({
+          code: "VIDEO_CONTAINER_INVALID",
+          error: "The recording is not a recognized MP4, WebM, or Ogg media container.",
+        });
+        return;
+      }
+
+      const recordedAt = new Date().toISOString();
+      const originalPath = getVideoFilePath(videoId, detected.extension);
+      fs.renameSync(tempPath, originalPath);
+
+      if (fs.statSync(originalPath).size !== videoBuffer.length) {
+        throw new Error("The complete video payload was not written to storage.");
+      }
+
+      // Commit the original recording to SQLite before any AI/transcoding work.
       saveVideoToDatabase({
         id: videoId,
         interviewId: interview.id,
@@ -1263,6 +1346,7 @@ app.post(
 
       res.status(201).json({
         success: true,
+        complete: true,
         videoRecording: {
           id: videoId,
           durationSeconds,
@@ -1276,8 +1360,6 @@ app.post(
         },
       });
 
-      // Convert WebM/Ogg to H.264/AAC in the background. Until conversion
-      // completes, playback still works from the original SQLite BLOB.
       if (detected.extension !== "mp4") {
         void transcodeToCompatibleMp4(videoId, originalPath).then((compatibleMp4) => {
           if (!compatibleMp4 || !fs.existsSync(compatibleMp4)) return;
@@ -1301,7 +1383,13 @@ app.post(
       }
     } catch (error: any) {
       console.error("Video database upload failed:", error);
-      res.status(500).json({ code: "VIDEO_DATABASE_WRITE_FAILED", error: "The recording could not be saved to the video database. Please try the upload again.", details: process.env.NODE_ENV === "production" ? undefined : error?.message, retryable: true });
+      try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
+      res.status(500).json({
+        code: "VIDEO_DATABASE_WRITE_FAILED",
+        error: "The recording could not be saved to the video database.",
+        details: process.env.NODE_ENV === "production" ? undefined : error?.message,
+        retryable: true,
+      });
     }
   }
 );
