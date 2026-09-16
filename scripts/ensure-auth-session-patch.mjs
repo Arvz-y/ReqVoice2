@@ -11,7 +11,6 @@ if (source.includes('AUTH_TOKEN_TTL_SECONDS') && source.includes('createAuthToke
 
 let code = source;
 
-// Add crypto without disturbing the existing imports.
 code = code.replace(
   'import fs from "fs";\n',
   'import fs from "fs";\nimport crypto from "crypto";\n'
@@ -49,7 +48,7 @@ function createAuthToken(user: StoredUser): string {
   };
   const encoded = base64UrlEncode(JSON.stringify(payload));
   const signature = crypto.createHmac("sha256", AUTH_SECRET).update(encoded).digest("base64url");
-  return \\`rv2.\\${encoded}.\\${signature}\\`;
+  return "rv2." + encoded + "." + signature;
 }
 
 function verifyAuthToken(token: string): StoredUser | null {
@@ -57,7 +56,8 @@ function verifyAuthToken(token: string): StoredUser | null {
   const parts = token.split(".");
   if (parts.length !== 3 || parts[0] !== "rv2") return null;
 
-  const [, encoded, providedSignature] = parts;
+  const encoded = parts[1];
+  const providedSignature = parts[2];
   const expectedSignature = crypto.createHmac("sha256", AUTH_SECRET).update(encoded).digest("base64url");
   const provided = Buffer.from(providedSignature);
   const expected = Buffer.from(expectedSignature);
@@ -71,8 +71,6 @@ function verifyAuthToken(token: string): StoredUser | null {
     const storedUser = usersDb.find((u) => u.id === payload.id);
     if (storedUser) return storedUser;
 
-    // The account data may be missing after an in-memory database restart, but
-    // the signed identity remains valid for the active session.
     return {
       id: payload.id,
       name: payload.name || "ReqVoice User",
@@ -115,23 +113,20 @@ function sanitizeUser(user: StoredUser) {
 
 code = code.slice(0, authStart) + authBlock + code.slice(authEnd);
 
-// Replace random session-token creation in login and registration.
 code = code.replace(
-  'const token = `rv2_\\${Date.now().toString(36)}_\\${Math.random().toString(36).substring(2, 10)}`;\n  activeSessions.set(token, user);',
+  'const token = `rv2_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 10)}`;\n  activeSessions.set(token, user);',
   'const token = createAuthToken(user);\n  activeSessions.set(token, user);'
 );
 code = code.replace(
-  'const token = `rv2_\\${Date.now().toString(36)}_\\${Math.random().toString(36).substring(2, 10)}`;\n  activeSessions.set(token, newUser);',
+  'const token = `rv2_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 10)}`;\n  activeSessions.set(token, newUser);',
   'const token = createAuthToken(newUser);\n  activeSessions.set(token, newUser);'
 );
 
-// Logout must revoke the token, not only delete the in-memory cache entry.
 code = code.replace(
   '    activeSessions.delete(token);',
   '    activeSessions.delete(token);\n    revokedTokens.add(token);'
 );
 
-// Profile changes should issue a fresh token carrying the updated claims.
 const profileResponse = '  res.json({ success: true, user: sanitizeUser(user) });\n});\n\napp.put("/api/auth/password"';
 if (code.includes(profileResponse)) {
   code = code.replace(
