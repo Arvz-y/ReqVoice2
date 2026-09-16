@@ -298,11 +298,12 @@ videoDatabase.exec(
   'CREATE TABLE IF NOT EXISTS interview_videos (' +
   'id TEXT PRIMARY KEY, interview_id TEXT NOT NULL, question_id TEXT, ' +
   'mime_type TEXT NOT NULL, source_mime_type TEXT NOT NULL, delivery_mime_type TEXT NOT NULL, ' +
-  'original_extension TEXT NOT NULL, original_blob BLOB NOT NULL, delivery_blob BLOB, ' +
+  'original_extension TEXT NOT NULL, original_blob BLOB, delivery_blob BLOB, storage_path TEXT, ' +
   'duration_seconds REAL NOT NULL DEFAULT 0, recorded_at TEXT NOT NULL, created_at TEXT NOT NULL' +
   '); ' +
   'CREATE INDEX IF NOT EXISTS idx_interview_videos_interview_question ON interview_videos(interview_id, question_id);'
 );
+try { videoDatabase.exec('ALTER TABLE interview_videos ADD COLUMN storage_path TEXT'); } catch {}
 console.log('Video database:', videoDatabasePath);
 
 // Persist interview sessions in the same SQLite database. Render can restart or
@@ -359,39 +360,30 @@ interviewsDb = loadInterviewsFromDatabase();
 console.log(`Loaded ${interviewsDb.length} persisted interview session(s).`);
 
 const saveVideoToDatabase = (record: {
-  id: string;
-  interviewId: string;
-  questionId?: string;
-  sourceMimeType: string;
-  sourceExtension: string;
-  originalBuffer: Buffer;
-  deliveryMimeType: string;
-  deliveryBuffer?: Buffer | null;
-  durationSeconds: number;
-  recordedAt: string;
+  id: string; interviewId: string; questionId?: string; sourceMimeType: string;
+  sourceExtension: string; originalBuffer: Buffer; deliveryMimeType: string;
+  deliveryBuffer?: Buffer | null; durationSeconds: number; recordedAt: string; storagePath?: string;
 }) => {
   const stmt = videoDatabase.prepare(
-    'INSERT INTO interview_videos (id, interview_id, question_id, mime_type, source_mime_type, delivery_mime_type, original_extension, original_blob, delivery_blob, duration_seconds, recorded_at, created_at) ' +
-    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
-    'ON CONFLICT(id) DO UPDATE SET interview_id=excluded.interview_id, question_id=excluded.question_id, mime_type=excluded.mime_type, source_mime_type=excluded.source_mime_type, delivery_mime_type=excluded.delivery_mime_type, original_extension=excluded.original_extension, original_blob=excluded.original_blob, delivery_blob=excluded.delivery_blob, duration_seconds=excluded.duration_seconds, recorded_at=excluded.recorded_at'
+    'INSERT INTO interview_videos (id, interview_id, question_id, mime_type, source_mime_type, delivery_mime_type, original_extension, original_blob, delivery_blob, storage_path, duration_seconds, recorded_at, created_at) ' +
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+    'ON CONFLICT(id) DO UPDATE SET interview_id=excluded.interview_id, question_id=excluded.question_id, mime_type=excluded.mime_type, source_mime_type=excluded.source_mime_type, delivery_mime_type=excluded.delivery_mime_type, original_extension=excluded.original_extension, original_blob=COALESCE(excluded.original_blob, interview_videos.original_blob), delivery_blob=COALESCE(excluded.delivery_blob, interview_videos.delivery_blob), storage_path=excluded.storage_path, duration_seconds=excluded.duration_seconds, recorded_at=excluded.recorded_at'
   );
-  stmt.run(record.id, record.interviewId, record.questionId || null, record.deliveryMimeType, record.sourceMimeType, record.deliveryMimeType, record.sourceExtension, record.originalBuffer, record.deliveryBuffer || null, record.durationSeconds || 0, record.recordedAt, new Date().toISOString());
+  stmt.run(record.id, record.interviewId, record.questionId || null, record.deliveryMimeType, record.sourceMimeType, record.deliveryMimeType, record.sourceExtension, record.storagePath ? null : record.originalBuffer, record.deliveryBuffer || null, record.storagePath || null, record.durationSeconds || 0, record.recordedAt, new Date().toISOString());
 };
 
 const getVideoDatabaseRecord = (videoId: string) => {
   const row = videoDatabase.prepare('SELECT * FROM interview_videos WHERE id = ?').get(videoId) as any;
   if (!row) return null;
+  let originalBuffer = row.original_blob ? Buffer.from(row.original_blob as Uint8Array) : Buffer.alloc(0);
+  const storagePath = row.storage_path ? String(row.storage_path) : null;
   return {
-    id: String(row.id),
-    interviewId: String(row.interview_id),
+    id: String(row.id), interviewId: String(row.interview_id),
     questionId: row.question_id ? String(row.question_id) : undefined,
-    sourceMimeType: String(row.source_mime_type),
-    deliveryMimeType: String(row.delivery_mime_type),
-    originalExtension: String(row.original_extension),
-    originalBuffer: Buffer.from(row.original_blob as Uint8Array),
+    sourceMimeType: String(row.source_mime_type), deliveryMimeType: String(row.delivery_mime_type),
+    originalExtension: String(row.original_extension), originalBuffer,
     deliveryBuffer: row.delivery_blob ? Buffer.from(row.delivery_blob as Uint8Array) : null,
-    durationSeconds: Number(row.duration_seconds) || 0,
-    recordedAt: String(row.recorded_at),
+    storagePath, durationSeconds: Number(row.duration_seconds) || 0, recordedAt: String(row.recorded_at),
   };
 };
 
@@ -1312,36 +1304,26 @@ app.post(
         return;
       }
 
-      const videoBuffer = fs.readFileSync(tempPath);
-      const detected = detectVideoContainer(videoBuffer);
+      const header = Buffer.alloc(16);
+      const fd = fs.openSync(tempPath, "r");
+      try { fs.readSync(fd, header, 0, 16, 0); } finally { fs.closeSync(fd); }
+      const detected = detectVideoContainer(header);
       if (!detected) {
-        res.status(422).json({
-          code: "VIDEO_CONTAINER_INVALID",
-          error: "The recording is not a recognized MP4, WebM, or Ogg media container.",
-        });
+        res.status(422).json({ code: "VIDEO_CONTAINER_INVALID", error: "The recording is not a recognized MP4, WebM, or Ogg media container." });
         return;
       }
-
       const recordedAt = new Date().toISOString();
       const originalPath = getVideoFilePath(videoId, detected.extension);
       fs.renameSync(tempPath, originalPath);
+      if (fs.statSync(originalPath).size !== receivedBytes) throw new Error("The complete video payload was not written to storage.");
 
-      if (fs.statSync(originalPath).size !== videoBuffer.length) {
-        throw new Error("The complete video payload was not written to storage.");
-      }
-
-      // Commit the original recording to SQLite before any AI/transcoding work.
+      // Keep large media out of SQLite BLOBs. SQLite stores authoritative metadata;
+      // the persistent video vault stores the complete binary recording.
       saveVideoToDatabase({
-        id: videoId,
-        interviewId: interview.id,
-        questionId,
-        sourceMimeType: detected.mimeType,
-        sourceExtension: detected.extension,
-        originalBuffer: videoBuffer,
-        deliveryMimeType: detected.extension === "mp4" ? "video/mp4" : detected.mimeType,
-        deliveryBuffer: detected.extension === "mp4" ? videoBuffer : null,
-        durationSeconds,
-        recordedAt,
+        id: videoId, interviewId: interview.id, questionId,
+        sourceMimeType: detected.mimeType, sourceExtension: detected.extension,
+        originalBuffer: Buffer.alloc(0), deliveryMimeType: detected.mimeType,
+        deliveryBuffer: null, storagePath: originalPath, durationSeconds, recordedAt,
       });
 
       res.status(201).json({
@@ -1582,9 +1564,10 @@ const ensureCompatibleVideoDelivery = async (videoId: string) => {
 
 const resolveStoredVideo = (videoId: string): { buffer: Buffer; mimeType: string } | null => {
   const dbRecord = getVideoDatabaseRecord(videoId);
-  if (dbRecord) {
-    return { buffer: dbRecord.originalBuffer, mimeType: dbRecord.sourceMimeType };
+  if (dbRecord?.storagePath && fs.existsSync(dbRecord.storagePath)) {
+    return { buffer: fs.readFileSync(dbRecord.storagePath), mimeType: dbRecord.deliveryMimeType || dbRecord.sourceMimeType };
   }
+  if (dbRecord?.originalBuffer?.length) return { buffer: dbRecord.originalBuffer, mimeType: dbRecord.deliveryMimeType || dbRecord.sourceMimeType };
   const cached = videosStore.get(videoId);
   if (cached?.buffer?.length) return { buffer: cached.buffer, mimeType: cached.mimeType || "video/webm" };
   const original = findOriginalVideoPath(videoId);
