@@ -675,9 +675,13 @@ app.post("/api/interviews/:id/response", (req: Request, res: Response) => {
   // Persist the actual recording before accepting the response. The disk vault is the durable
   // backing store; videosStore is the fast in-memory cache used for streaming.
   if (videoRecording && videoRecording.id) {
-    if (!videoRecording.base64Data) {
+    if (!videoRecording.base64Data && videoRecording.storageStatus !== "saved") {
       res.status(400).json({ error: "The recorded video could not be accessed, so no transcript or response media was stored." });
       return;
+    }
+    // Reports may update transcript metadata for a video that is already persisted.
+    if (!videoRecording.base64Data && videoRecording.storageStatus === "saved") {
+      videoRecording.videoUrl = "/api/videos/" + videoRecording.id;
     }
     try {
       const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64,/, "");
