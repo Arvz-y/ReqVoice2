@@ -2125,9 +2125,9 @@ Platform State Knowledge:
 
     // If Gemini client is available and API key is present
     if (ai) {
-      // Validate model ID fallback
-      const validModels = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-pro", "gemini-1.5-flash"];
-      const selectedModel = validModels.includes(model) ? model : "gemini-2.5-flash";
+      // Only advertise/use models supported by the current Gemini configuration.
+      const validModels = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.6-pro"];
+      const selectedModel = validModels.includes(model) ? model : "gemini-3.6-flash";
 
       // Format conversation turns
       const contents: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> = [];
@@ -2199,8 +2199,14 @@ Be precise, structured, and insightful. When asked for requirements, format them
     });
   } catch (error: any) {
     console.error("AI Chatbot Error:", error);
-    res.status(500).json({
-      error: "Failed to generate AI response. " + (error?.message || "Please verify your AI model parameters."),
+    const rawMessage = error?.message || "Please verify your AI model parameters.";
+    const retryable = /429|500|502|503|504|UNAVAILABLE|overloaded|high demand|timeout/i.test(rawMessage);
+    res.status(retryable ? 503 : 500).json({
+      code: retryable ? "AI_SERVICE_UNAVAILABLE" : "AI_GENERATION_FAILED",
+      error: retryable
+        ? `The AI service is temporarily unavailable. ${rawMessage}`
+        : `AI response generation failed. ${rawMessage}`,
+      retryable,
     });
   }
 });
