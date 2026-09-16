@@ -476,26 +476,13 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
         base64Media = await blobToBase64(recordedBlob);
       }
 
-      // 1. Get or generate transcription and sentiment if not already calculated
-      let finalTranscript = liveTranscript || typedResponse.trim();
-      let finalSentiment = sentimentResult;
+      // Evidence rule: AI transcript data is created only from an actual recording.
+      // A typed answer remains the interviewee's written response and is never relabeled as a transcript.
+      let finalTranscript = recordedBlob ? liveTranscript.trim() : '';
+      let finalSentiment = recordedBlob ? sentimentResult : null;
 
-      if (!finalSentiment) {
-        try {
-          const sRes = await api.gemini.analyzeResponse({
-            text: finalTranscript,
-            questionText: currentQ.questionText,
-            category: currentQ.category,
-            speakerRole: sessionData.interviewee?.role,
-          });
-          finalSentiment = {
-            sentiment: sRes.sentiment,
-            sentimentScore: sRes.sentimentScore,
-            sentimentTone: sRes.sentimentTone,
-            keyRequirements: sRes.keyRequirements,
-            urgency: sRes.urgency,
-          };
-        } catch {}
+      if (recordedBlob && !finalTranscript) {
+        throw new Error('The recorded video could not be transcribed. The response will not be labeled as a transcript.');
       }
 
       // 2. Save compressed video blob locally in IndexedDB if not already saved
@@ -507,7 +494,7 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
 
       const responsePayload = {
         questionId: currentQ.id,
-        responseText: finalTranscript,
+        responseText: recordedBlob ? finalTranscript : typedResponse.trim(),
         audioDurationSeconds: recordingSeconds || undefined,
         videoRecording: recordedBlob
           ? {
@@ -520,15 +507,17 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
               base64Data: base64Media || undefined,
             }
           : undefined,
-        aiTranscript: {
-          transcript: finalTranscript,
-          sentiment: finalSentiment?.sentiment || 'constructive',
-          sentimentScore: finalSentiment?.sentimentScore || 80,
-          sentimentTone: finalSentiment?.sentimentTone || 'Constructive Analysis',
-          keyRequirements: finalSentiment?.keyRequirements || [],
-          generatedAt: new Date().toISOString(),
-          modelUsed: 'gemini-3.8-flash',
-        },
+        aiTranscript: recordedBlob
+          ? {
+              transcript: finalTranscript,
+              sentiment: finalSentiment?.sentiment || 'neutral',
+              sentimentScore: finalSentiment?.sentimentScore ?? 50,
+              sentimentTone: finalSentiment?.sentimentTone || 'Video Analysis',
+              keyRequirements: finalSentiment?.keyRequirements || [],
+              generatedAt: new Date().toISOString(),
+              modelUsed: 'gemini-3.8-flash',
+            }
+          : undefined,
       };
 
       // 3. Submit to server
