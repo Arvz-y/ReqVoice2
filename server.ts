@@ -369,7 +369,7 @@ const saveVideoToDatabase = (record: {
     'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
     'ON CONFLICT(id) DO UPDATE SET interview_id=excluded.interview_id, question_id=excluded.question_id, mime_type=excluded.mime_type, source_mime_type=excluded.source_mime_type, delivery_mime_type=excluded.delivery_mime_type, original_extension=excluded.original_extension, original_blob=COALESCE(excluded.original_blob, interview_videos.original_blob), delivery_blob=COALESCE(excluded.delivery_blob, interview_videos.delivery_blob), storage_path=excluded.storage_path, duration_seconds=excluded.duration_seconds, recorded_at=excluded.recorded_at'
   );
-  stmt.run(record.id, record.interviewId, record.questionId || null, record.deliveryMimeType, record.sourceMimeType, record.deliveryMimeType, record.sourceExtension, record.storagePath ? null : record.originalBuffer, record.deliveryBuffer || null, record.storagePath || null, record.durationSeconds || 0, record.recordedAt, new Date().toISOString());
+  stmt.run(record.id, record.interviewId, record.questionId || null, record.deliveryMimeType, record.sourceMimeType, record.deliveryMimeType, record.sourceExtension, record.originalBuffer?.length ? record.originalBuffer : null, record.deliveryBuffer || null, record.storagePath || null, record.durationSeconds || 0, record.recordedAt, new Date().toISOString());
 };
 
 const getVideoDatabaseRecord = (videoId: string) => {
@@ -1218,7 +1218,7 @@ app.get("/api/share/:token", (req: Request, res: Response) => {
 // Binary video upload. The browser sends the Blob directly instead of embedding it in JSON/base64.
 app.post(
   "/api/share/:token/video",
-  express.raw({ type: ["video/*", "application/octet-stream"], limit: "10mb" }),
+  express.raw({ type: ["video/*", "application/octet-stream"], limit: "20mb" }),
   async (req: Request, res: Response) => {
     const interview = interviewsDb.find((i) => i.shareToken === req.params.token);
     if (!interview) {
@@ -1313,18 +1313,32 @@ app.post(
         return;
       }
       const recordedAt = new Date().toISOString();
-      const originalPath = getVideoFilePath(videoId, detected.extension);
+        const originalPath = getVideoFilePath(videoId, detected.extension);
       fs.renameSync(tempPath, originalPath);
-      if (fs.statSync(originalPath).size !== receivedBytes) throw new Error("The complete video payload was not written to storage.");
+      if (!fs.existsSync(originalPath) || fs.statSync(originalPath).size !== receivedBytes) {
+        throw new Error("The complete video payload was not written to storage.");
+      }
 
-      // Keep large media out of SQLite BLOBs. SQLite stores authoritative metadata;
-      // the persistent video vault stores the complete binary recording.
+      // SQLite is the authoritative video database. Keep the complete original
+      // bytes in the video row as well as the filesystem copy. This makes playback
+      // independent of Render's ephemeral filesystem and prevents a successful
+      // upload from becoming an unplayable reference after restart/redeploy.
+      const completeVideoBuffer = fs.readFileSync(originalPath);
+      if (completeVideoBuffer.length !== receivedBytes) {
+        throw new Error("The stored video bytes do not match the uploaded byte count.");
+      }
       saveVideoToDatabase({
         id: videoId, interviewId: interview.id, questionId,
         sourceMimeType: detected.mimeType, sourceExtension: detected.extension,
-        originalBuffer: Buffer.alloc(0), deliveryMimeType: detected.mimeType,
+        originalBuffer: completeVideoBuffer, deliveryMimeType: detected.mimeType,
         deliveryBuffer: null, storagePath: originalPath, durationSeconds, recordedAt,
       });
+
+      const savedRecord = getVideoDatabaseRecord(videoId);
+      if (!savedRecord || savedRecord.interviewId !== interview.id ||
+          savedRecord.questionId !== questionId || savedRecord.originalBuffer.length !== receivedBytes) {
+        throw new Error("Video database verification failed after upload.");
+      }
 
       res.status(201).json({
         success: true,
@@ -1501,6 +1515,12 @@ const ensureCompatibleVideoDelivery = async (videoId: string) => {
     return record;
   }
   if (record.sourceMimeType === "video/mp4" && record.originalBuffer.length > 1024) {
+    return record;
+  }
+
+  // If an original recording is already stored in SQLite, it is immediately
+  // playable as a fallback. Never make a client request wait on FFmpeg.
+  if (record.originalBuffer.length > 1024 && !ffmpegPath) {
     return record;
   }
 
