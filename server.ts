@@ -1438,20 +1438,24 @@ app.get("/api/videos/:id/download", (req: Request, res: Response) => {
 });
 // 5. AI Video & Audio Transcription Endpoint using Gemini API
 app.post("/api/gemini/transcribe-video", async (req: Request, res: Response) => {
-  const { base64Media, mimeType, questionText, category, durationSeconds } = req.body;
+  const { videoId, base64Media, mimeType, questionText, category, durationSeconds } = req.body;
 
   const ai = getGeminiClient();
+  const storedVideo = videoId ? getVideoDatabaseRecord(String(videoId)) : null;
+  const mediaBuffer = storedVideo?.originalBuffer;
+  const mediaData = mediaBuffer ? mediaBuffer.toString("base64") : base64Media;
+  const mediaMime = storedVideo?.sourceMimeType || mimeType || "video/webm";
 
-  if (ai && base64Media) {
+  if (ai && mediaData) {
     try {
-      // Use gemini-3.8-flash (or gemini-3.5-transcribe) to generate transcript & requirements
-      const mediaMime = mimeType || "video/webm";
+      // Prefer the server-side video database record so the browser never has to
+      // resend a large base64 video payload just to request transcription.
       const contents = {
         parts: [
           {
             inlineData: {
               mimeType: mediaMime,
-              data: base64Media,
+              data: mediaData,
             },
           },
           {
