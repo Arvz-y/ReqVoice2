@@ -743,8 +743,17 @@ app.post("/api/interviews/:id/response", (req: Request, res: Response) => {
     category: question ? question.category : "workflow",
     responseText: responseText || "",
     audioDurationSeconds: audioDurationSeconds || 0,
-    videoRecording,
-    aiTranscript: (videoRecording?.storageStatus === "saved" && aiTranscript?.transcript?.trim()) ? aiTranscript : undefined,
+    videoRecording: videoRecording
+      ? {
+          ...videoRecording,
+          transcriptionStatus: aiTranscript?.transcript?.trim() ? "completed" : "unavailable",
+        }
+      : undefined,
+    // Never create or preserve an AI transcript unless it contains text from
+    // the submitted recording.
+    aiTranscript: (videoRecording?.storageStatus === "saved" && aiTranscript?.transcript?.trim())
+      ? aiTranscript
+      : undefined,
     createdAt: new Date().toISOString(),
   };
 
@@ -924,13 +933,17 @@ app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
   const { questionId, responseText, audioDurationSeconds, videoRecording, aiTranscript } = req.body;
   const question = interview.questions.find((q) => q.id === questionId);
 
-  // Persist the actual recording before accepting the response. The disk vault is the durable
-  // backing store; videosStore is the fast in-memory cache used for streaming.
+  // Persist the actual recording before accepting the response. Video storage is
+  // deliberately independent from AI transcription: a recording remains valid
+  // evidence even when Gemini cannot transcribe it.
   if (videoRecording && videoRecording.id) {
-    if (!videoRecording.base64Data) {
-      res.status(400).json({ error: "The recorded video could not be accessed, so no transcript or response media was stored." });
+    if (!videoRecording.base64Data && videoRecording.storageStatus !== "saved") {
+      res.status(400).json({ error: "The recorded video payload is missing. The response cannot be stored until the actual recording is received." });
       return;
     }
+    if (!videoRecording.base64Data && videoRecording.storageStatus === "saved") {
+      videoRecording.videoUrl = "/api/videos/" + videoRecording.id;
+    } else {
     try {
       const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64,/, "");
       const videoBuffer = Buffer.from(cleanBase64, "base64");
@@ -955,6 +968,7 @@ app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
       console.warn("Could not save video recording:", err);
       res.status(500).json({ error: "The video recording could not be saved. No response was stored." });
       return;
+    }
     }
   }
 
