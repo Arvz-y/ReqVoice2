@@ -227,6 +227,11 @@ export const api = {
       request<{ interview: InterviewSession; summaryReport: any }>(`/api/interviews/${id}/finish`, {
         method: 'POST',
       }),
+    analyticsAI: (systemId: string) =>
+      request<any>('/api/interviews/analytics/ai', {
+        method: 'POST',
+        body: JSON.stringify({ systemId }),
+      }),
     delete: (id: string) =>
       request<{ success: boolean }>(`/api/interviews/${id}`, {
         method: 'DELETE',
