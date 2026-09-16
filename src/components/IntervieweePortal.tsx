@@ -92,6 +92,7 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
 
   // Load interview details
   useEffect(() => {
@@ -272,6 +273,11 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
         const completeBlob = new Blob(recordedChunksRef.current, {
           type: mimeType || 'video/webm',
         });
+        const measuredDuration = recordingStartedAtRef.current
+          ? Math.max(0, (Date.now() - recordingStartedAtRef.current) / 1000)
+          : recordingSeconds;
+        const finalDuration = Math.max(1, Math.round(measuredDuration));
+        setRecordingSeconds(finalDuration);
         setRecordedBlob(completeBlob);
 
         const videoUrl = URL.createObjectURL(completeBlob);
@@ -282,14 +288,25 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
         const vidId = `vid-${currentQ?.id || 'q'}-${Date.now()}`;
         currentSavedVideoIdRef.current = vidId;
         try {
-          await saveVideoBlob(vidId, completeBlob, recordingSeconds);
+          await saveVideoBlob(vidId, completeBlob, finalDuration);
         } catch (err) {
           console.warn('Local video storage error:', err);
         }
 
         // Calculate space-saving compression metric
-        const stats = calculateCompressionStats(recordingSeconds, completeBlob.size);
+        const stats = calculateCompressionStats(finalDuration, completeBlob.size);
         setCompressionMetrics(stats);
+
+        // Recording has fully stopped. Turn off the camera preview so the
+        // interface clearly transitions from REC to Review mode.
+        if (mediaStreamRef.current) {
+          mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+          mediaStreamRef.current = null;
+        }
+        if (liveVideoRef.current) liveVideoRef.current.srcObject = null;
+        setCameraActive(false);
+        recordingStartedAtRef.current = null;
+        mediaRecorderRef.current = null;
 
         // Run real-time transcription and automatic sentiment analysis on recorded video
         triggerAutoTranscriptionAndSentiment(completeBlob, recordingSeconds);
@@ -297,6 +314,7 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
 
       mediaRecorderRef.current = recorder;
       recorder.start(1000);
+      recordingStartedAtRef.current = Date.now();
       setIsRecording(true);
 
       timerIntervalRef.current = setInterval(() => {
