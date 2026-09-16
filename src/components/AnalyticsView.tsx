@@ -60,6 +60,25 @@ const Bar: React.FC<{ label: string; value: number; total: number }> = ({ label,
   </div>
 );
 
+
+const LineGraph: React.FC<{ title: string; labels: string[]; series: { name: string; values: number[] }[]; max?: number }> = ({ title, labels, series, max }) => {
+  const width=760,height=260,left=48,right=18,top=28,bottom=42,plotW=width-left-right,plotH=height-top-bottom;
+  const allValues=series.flatMap(s=>s.values), upper=Math.max(max||0,...allValues,1);
+  const x=(i:number)=>labels.length<=1?left+plotW/2:left+(i/(labels.length-1))*plotW;
+  const y=(v:number)=>top+plotH-(v/upper)*plotH;
+  const points=(values:number[])=>values.map((v,i)=>x(i)+","+y(v)).join(" ");
+  return <div className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
+    <h3 className="text-sm font-bold text-white mb-3">{title}</h3>
+    <div className="w-full overflow-x-auto"><svg viewBox={"0 0 "+width+" "+height} className="w-full min-w-[560px] h-64" role="img" aria-label={title}>
+      {Array.from({length:5}).map((_,i)=>{const value=Math.round((upper/4)*(4-i));return <g key={i}><line x1={left} x2={width-right} y1={y(value)} y2={y(value)} stroke="currentColor" className="text-slate-800"/><text x={left-8} y={y(value)+4} textAnchor="end" className="fill-slate-500 text-[10px]">{value}</text></g>})}
+      <line x1={left} x2={left} y1={top} y2={height-bottom} stroke="currentColor" className="text-slate-700"/><line x1={left} x2={width-right} y1={height-bottom} y2={height-bottom} stroke="currentColor" className="text-slate-700"/>
+      {series.map((s,si)=><g key={s.name}><polyline fill="none" stroke="currentColor" className={si===0?"text-indigo-400":si===1?"text-emerald-400":"text-amber-400"} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" points={points(s.values)}/>{s.values.map((v,i)=><circle key={i} cx={x(i)} cy={y(v)} r="3.5" className={si===0?"fill-indigo-400":si===1?"fill-emerald-400":"fill-amber-400"}/>)}</g>)}
+      {labels.map((label,i)=><text key={i} x={x(i)} y={height-18} textAnchor="middle" className="fill-slate-500 text-[9px]">{label}</text>)}
+    </svg></div>
+    <div className="flex flex-wrap gap-4 mt-1">{series.map((s,si)=><div key={s.name} className="flex items-center gap-1.5 text-[10px] text-slate-400"><span className={"w-2.5 h-2.5 rounded-full "+(si===0?"bg-indigo-400":si===1?"bg-emerald-400":"bg-amber-400")}/>{s.name}</div>)}</div>
+  </div>;
+};
+
 const InsightCard: React.FC<{ item: InsightItem; evidence: AIAnalytics['evidence']; label?: string }> = ({ item, evidence, label }) => {
   const [open, setOpen] = useState(false);
   const ids = item.evidenceIds || [];
@@ -283,24 +302,17 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ interviews, system
         ))}
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4">
-        <div className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
-          <h3 className="text-sm font-bold text-white mb-4">Answer Sentiment</h3>
-          <div className="space-y-4">
-            <Bar label="Positive" value={stats.positive} total={stats.responses} />
-            <Bar label="Constructive" value={stats.constructive} total={stats.responses} />
-            <Bar label="Neutral" value={stats.neutral} total={stats.responses} />
-            <Bar label="Negative" value={stats.negative} total={stats.responses} />
-          </div>
-        </div>
-        <div className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
-          <h3 className="text-sm font-bold text-white mb-4">Question Coverage</h3>
-          <div className="space-y-3 max-h-52 overflow-auto">
-            {stats.questions.map((q, i) => <div key={i} className="flex gap-3 items-center"><span className="text-[10px] text-indigo-400 w-5">Q{i + 1}</span><div className="flex-1"><div className="text-[10px] text-slate-300 truncate">{q.question}</div><div className="h-1.5 bg-slate-800 rounded-full mt-1"><div className="h-full bg-indigo-400 rounded-full" style={{ width: `${Math.min(100, q.count * 10)}%` }} /></div></div><span className="text-[10px] text-slate-500">{q.count}</span></div>)}
-            {stats.questions.length === 0 && <div className="text-xs text-slate-500">No answers yet.</div>}
-          </div>
-        </div>
-      </div>
+      {scoped.length > 0 && (() => {
+        const ordered=[...scoped].sort((a,b)=>new Date(a.completedAt||0).getTime()-new Date(b.completedAt||0).getTime());
+        const labels=ordered.map((_,i)=>"I"+(i+1));
+        const sentimentSeries=[
+          {name:"Positive",values:ordered.map(i=>Object.values(i.responses||{}).filter((r:any)=>r.aiTranscript?.sentiment==="positive").length)},
+          {name:"Constructive",values:ordered.map(i=>Object.values(i.responses||{}).filter((r:any)=>r.aiTranscript?.sentiment==="constructive").length)},
+          {name:"Negative",values:ordered.map(i=>Object.values(i.responses||{}).filter((r:any)=>r.aiTranscript?.sentiment==="negative").length)}
+        ];
+        const responseSeries=[{name:"Answers per interview",values:ordered.map(i=>Object.values(i.responses||{}).length)}];
+        return <div className="grid lg:grid-cols-2 gap-4"><LineGraph title="Answer Sentiment Trend" labels={labels} series={sentimentSeries}/><LineGraph title="Answers per Interview" labels={labels} series={responseSeries}/></div>;
+      })()}
 
       {aiError && <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-xs text-red-300"><AlertTriangle className="inline w-4 h-4 mr-2" />{aiError}</div>}
 
