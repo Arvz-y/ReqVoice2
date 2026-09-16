@@ -69,6 +69,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const requestId = errorPayload?.requestId;
     const retryable = errorPayload?.retryable ?? response.status >= 500;
     const suffix = requestId ? ` (Request ID: ${requestId})` : "";
+
+    // Surface AI quota/rate-limit responses directly instead of collapsing them
+    // into a generic "Request failed" message.
+    if (response.status === 429 && errorPayload?.code === 'AI_QUOTA_EXHAUSTED') {
+      errMsg = errorPayload.error || 'AI generation quota is temporarily exhausted. Please wait or use a billed Gemini project.';
+    }
     if (response.status >= 500 && !errMsg.toLowerCase().includes("request failed")) {
       errMsg = `${errMsg}${retryable ? " Please try again shortly." : ""}${suffix}`;
     } else if (requestId) {
