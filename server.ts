@@ -14,8 +14,12 @@ dotenv.config();
 
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "";
 const supabase: SupabaseClient | null = supabaseUrl && supabaseServiceRoleKey
   ? createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
+  : null;
+const supabaseAuth: SupabaseClient | null = supabaseUrl && supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } })
   : null;
 const SUPABASE_VIDEO_BUCKET = process.env.SUPABASE_VIDEO_BUCKET || "interview-videos";
 
@@ -642,7 +646,7 @@ interface StoredUser {
   email: string;
   role: string;
   department: string;
-  password: string; // Stored securely
+  password: string; // Legacy field; new accounts authenticate through Supabase Auth
   avatarUrl: string;
   bio: string;
   isFirstTime: boolean;
@@ -729,7 +733,7 @@ app.get("/api/auth/me", (req: Request, res: Response) => {
   res.json({ user: sanitizeUser(user) });
 });
 
-app.post("/api/auth/login", (req: Request, res: Response) => {
+app.post("/api/auth/login", async (req: Request, res: Response) => {
   const { usernameOrEmail, password } = req.body;
   if (!usernameOrEmail) {
     res.status(400).json({ error: "Username or email is required." });
@@ -746,8 +750,18 @@ app.post("/api/auth/login", (req: Request, res: Response) => {
     return;
   }
 
-  if (password && user.password !== password) {
-    res.status(401).json({ error: "Invalid password. Please verify and try again." });
+  if (supabaseAuth) {
+    const { data: authData, error: authError } = await supabaseAuth.auth.signInWithPassword({
+      email: user.email,
+      password: String(password || ""),
+    });
+    if (authError || !authData.user) {
+      res.status(401).json({ error: "Invalid password. Please verify and try again." });
+      return;
+    }
+  } else if (user.password && password !== user.password) {
+    // Temporary compatibility fallback for an environment where Supabase Auth is not configured.
+    res.status(503).json({ error: "Secure authentication is not configured. Please contact the administrator." });
     return;
   }
 
@@ -756,7 +770,7 @@ app.post("/api/auth/login", (req: Request, res: Response) => {
   res.json({ success: true, token, user: sanitizeUser(user) });
 });
 
-app.post("/api/auth/register", (req: Request, res: Response) => {
+app.post("/api/auth/register", async (req: Request, res: Response) => {
   const { name, username, email, password, role, department } = req.body;
   if (!name || !username || !email || !password) {
     res.status(400).json({ error: "All registration fields are required." });
@@ -771,12 +785,31 @@ app.post("/api/auth/register", (req: Request, res: Response) => {
     return;
   }
 
+  let authUserId = `usr-${Date.now().toString(36)}`;
+  if (supabase) {
+    if (!supabaseAuth) {
+      res.status(503).json({ error: "Supabase Auth client is not configured. Add SUPABASE_ANON_KEY to the server environment." });
+      return;
+    }
+    const { data: createdAuth, error: authError } = await supabase.auth.admin.createUser({
+      email: email.trim().toLowerCase(),
+      password: password.trim(),
+      email_confirm: true,
+      user_metadata: { name: name.trim(), username: username.trim().toLowerCase(), role: role || "Requirements Engineer", department: department || "Systems Engineering" },
+    });
+    if (authError || !createdAuth.user) {
+      res.status(400).json({ error: authError?.message || "Unable to create secure authentication account." });
+      return;
+    }
+    authUserId = createdAuth.user.id;
+  }
+
   const newUser: StoredUser = {
-    id: `usr-${Date.now().toString(36)}`,
+    id: authUserId,
     name: name.trim(),
     username: username.trim().toLowerCase(),
     email: email.trim().toLowerCase(),
-    password: password.trim(),
+    password: "",
     role: role || "Requirements Engineer",
     department: department || "Systems Engineering",
     avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=${username}`,
