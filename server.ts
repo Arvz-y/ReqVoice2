@@ -8,6 +8,17 @@ import { createServer as createViteServer } from "vite";
 dotenv.config();
 
 const app = express();
+
+app.use("/api", (req: Request, res: Response, next: any) => {
+  const startedAt = Date.now();
+  const requestId = req.headers["x-request-id"] || `api-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  res.setHeader("X-Request-ID", String(requestId));
+  res.on("finish", () => {
+    const elapsed = Date.now() - startedAt;
+    console.log(`[API ${requestId}] ${req.method} ${req.originalUrl} -> ${res.statusCode} ${elapsed}ms`);
+  });
+  next();
+});
 const PORT = Number(process.env.PORT) || 3000;
 
 // High limit for audio/video payloads
@@ -1170,6 +1181,12 @@ Analyze the spoken response and return a JSON object with:
 
 // 6. Gemini Suggest / Generate Questions by Interview Type (Structured, Semi-Structured, Unstructured)
 app.post("/api/gemini/suggest-questions", async (req: Request, res: Response) => {
+  console.log("[AI QUESTIONS] request received", {
+    systemName: req.body?.systemName,
+    interviewType: req.body?.interviewType,
+    promptVersion: req.body?.promptVersion,
+    count: req.body?.count,
+  });
   const { systemName, systemType, role, prompt: customPrompt, promptVersion, count, interviewType: rawInterviewType } = req.body;
   const requestedPrompt = typeof customPrompt === "string" ? customPrompt.trim() : "";
   const revision = Math.max(1, Number(promptVersion) || 1);
@@ -2246,6 +2263,16 @@ app.use((err: any, req: Request, res: Response, _next: any) => {
 });
 
 app.use(express.static(distPath));
+    app.all("/api/*", (req: Request, res: Response) => {
+      const requestId = String(res.getHeader("X-Request-ID") || "unknown");
+      res.status(404).json({
+        code: "API_ROUTE_NOT_FOUND",
+        error: `API endpoint not found: ${req.method} ${req.path}`,
+        requestId,
+        retryable: false,
+      });
+    });
+
     app.get("*", (req: Request, res: Response) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
