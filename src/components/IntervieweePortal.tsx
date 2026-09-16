@@ -309,7 +309,7 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
         mediaRecorderRef.current = null;
 
         // Run real-time transcription and automatic sentiment analysis on recorded video
-        triggerAutoTranscriptionAndSentiment(completeBlob, recordingSeconds);
+        triggerAutoTranscriptionAndSentiment(completeBlob, finalDuration);
       };
 
       mediaRecorderRef.current = recorder;
