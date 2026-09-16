@@ -705,7 +705,7 @@ app.post("/api/interviews/:id/response", (req: Request, res: Response) => {
       videoRecording.videoUrl = "/api/videos/" + videoRecording.id;
     } else {
       try {
-        const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64, "");
+        const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64,/, "");
       const videoBuffer = Buffer.from(cleanBase64, "base64");
       if (!videoBuffer.length) throw new Error("Empty video payload");
       const mimeType = videoRecording.mimeType || "video/webm";
