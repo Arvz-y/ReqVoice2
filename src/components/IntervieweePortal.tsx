@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { api } from '../lib/api';
-import { saveVideoBlob, deleteVideoBlob, calculateCompressionStats } from '../lib/videoStorage';
+import { saveVideoBlob, deleteVideoBlob, getVideoBlobUrl, calculateCompressionStats } from '../lib/videoStorage';
 import { InterviewQuestion } from '../types';
 import { useTheme } from './ThemeContext';
 
@@ -244,6 +244,23 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
     setCameraActive(false);
     setAudioLevel(0);
   };
+
+  // Restore the locally saved recording whenever the recording panel is
+  // mounted again. This prevents the preview from depending on a tab/mode switch
+  // to trigger a fresh render. The video remains local and does not require a
+  // network request.
+  useEffect(() => {
+    if (inputMode !== 'recording' || recordedVideoUrl || !currentSavedVideoIdRef.current) return;
+    let cancelled = false;
+    getVideoBlobUrl(currentSavedVideoIdRef.current)
+      .then((url) => {
+        if (!cancelled && url) setRecordedVideoUrl(url);
+      })
+      .catch((error) => console.warn('Unable to restore local recording preview:', error));
+    return () => {
+      cancelled = true;
+    };
+  }, [inputMode, recordedVideoUrl]);
 
   // Start recording video and audio
   const startRecording = () => {
