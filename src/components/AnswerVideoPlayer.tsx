@@ -100,7 +100,7 @@ export const AnswerVideoPlayer: React.FC<AnswerVideoPlayerProps> = ({
 
     // If we tried a local blob and it failed, try the server streaming endpoint
     if (videoRecording?.id && !resolvedUrl.startsWith('/api/videos/')) {
-      const serverUrl = `/api/videos/${videoRecording.id}`;
+      const serverUrl = `/api/videos/${videoRecording.id}/playback`;
       setResolvedUrl(serverUrl);
       return;
     }
@@ -146,6 +146,7 @@ export const AnswerVideoPlayer: React.FC<AnswerVideoPlayerProps> = ({
   const downloadUrl = videoRecording?.id
     ? `/api/videos/${videoRecording.id}/download`
     : resolvedUrl;
+  const downloadName = `reqvoice_recording_${videoRecording?.id || 'answer'}${videoRecording?.mimeType?.includes('mp4') ? '.mp4' : '.mp4'}`;
 
   return (
     <div className={`space-y-2 ${className}`}>
@@ -231,7 +232,7 @@ export const AnswerVideoPlayer: React.FC<AnswerVideoPlayerProps> = ({
           <span className="flex items-center space-x-1">
             <span className={`w-2 h-2 rounded-full ${resolvedUrl ? 'bg-emerald-400' : 'bg-slate-600'}`} />
             <span className="font-medium text-[11px]">
-              {usingAudioFallback ? 'Audio Mode' : 'VP8/WebM Stream'}
+              {usingAudioFallback ? 'Audio Mode' : 'H.264/AAC MP4'}
             </span>
           </span>
 
@@ -294,7 +295,7 @@ export const AnswerVideoPlayer: React.FC<AnswerVideoPlayerProps> = ({
               {downloadUrl && (
                 <a
                   href={downloadUrl}
-                  download={`reqvoice_recording_${videoRecording?.id || 'answer'}.webm`}
+                  download={downloadName}
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center space-x-1 px-2 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-indigo-200 text-[11px] border border-indigo-500/30 transition-colors cursor-pointer"
