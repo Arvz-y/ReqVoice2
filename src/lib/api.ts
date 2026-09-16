@@ -244,23 +244,38 @@ export const api = {
         questions: InterviewQuestion[];
         responses: Record<string, any>;
       }>(`/api/share/${token}`),
+    uploadVideo: async (token: string, questionId: string, videoId: string, blob: Blob, durationSeconds: number) => {
+      const headers: Record<string, string> = {
+        'Content-Type': blob.type || 'application/octet-stream',
+        'X-Question-ID': questionId,
+        'X-Video-ID': videoId,
+        'X-Duration-Seconds': String(durationSeconds || 0),
+      };
+      let response: Response;
+      try {
+        response = await fetch('/api/share/' + token + '/video', { method: 'POST', headers, body: blob });
+      } catch (err: any) {
+        throw new Error('Unable to upload the recording. ' + (err?.message || 'Please check your connection and try again.'));
+      }
+      if (!response.ok) {
+        let message = 'Video upload failed (' + response.status + ')';
+        try { const payload = await response.json(); if (payload?.error) message = payload.error; } catch {}
+        throw new Error(message);
+      }
+      return response.json() as Promise<{ success: boolean; videoRecording: any }>;
+    },
     submitAnswer: (
       token: string,
-      data: {
-        questionId: string;
-        responseText: string;
-        audioDurationSeconds?: number;
-        videoRecording?: any;
-        aiTranscript?: any;
-      }
+      data: { questionId: string; responseText: string; audioDurationSeconds?: number; videoRecording?: any; aiTranscript?: any; }
     ) =>
-      request<{ success: boolean; response: any; isComplete: boolean }>(`/api/share/${token}/submit`, {
+      request<{ success: boolean; response: any; isComplete: boolean }>('/api/share/' + token + '/submit', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
   },
   gemini: {
     transcribeVideo: (data: {
+      videoId?: string;
       base64Media?: string;
       mimeType?: string;
       questionText: string;
