@@ -227,6 +227,7 @@ export const api = {
       request<{ interview: InterviewSession; summaryReport: any }>(`/api/interviews/${id}/finish`, {
         method: 'POST',
       }),
+    generateDemoDataset: () => request<{ success: boolean; created: number; existing: number; system: SystemUnderStudy; interviews: InterviewSession[] }>('/api/demo/generate', { method: 'POST' }),
     analyticsAI: (systemId: string) =>
       request<any>('/api/interviews/analytics/ai', {
         method: 'POST',
