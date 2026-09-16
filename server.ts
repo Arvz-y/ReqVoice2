@@ -1070,7 +1070,7 @@ const streamStoredVideo = (req: Request, res: Response, download = false) => {
     return;
   }
 
-  const match = /^bytes=(\\d*)-(\\d*)$/.exec(range);
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range);
   if (!match) {
     res.status(416).setHeader("Content-Range", `bytes */${total}`).end();
     return;
