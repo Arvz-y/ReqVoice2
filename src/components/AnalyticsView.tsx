@@ -220,7 +220,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ interviews, system
             {demoLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
             {demoLoading ? 'Generating…' : 'Generate Demo Data'}
           </button>
-          {generateAI disabled={loadingAI || !systemId} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-500 text-white text-xs font-semibold disabled:opacity-50">
+          <button onClick={generateAI} disabled={loadingAI || !systemId} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-500 text-white text-xs font-semibold disabled:opacity-50">
             {loadingAI ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
             {loadingAI ? 'Analyzing…' : 'Analyze with AI'}
           </button>
