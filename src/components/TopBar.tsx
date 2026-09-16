@@ -6,6 +6,7 @@ import {
   Database,
   Layers,
   FileText,
+  Activity,
   Mic,
   LayoutDashboard,
   Bot,
@@ -44,6 +45,8 @@ export const TopBar: React.FC<TopBarProps> = ({
         return { title: 'Systems & Guides', icon: Layers, subtitle: 'Architectures & interview protocols' };
       case 'live':
         return { title: 'Session Monitor', icon: Mic, subtitle: 'Real-time proctoring (read-only)' };
+      case 'analytics':
+        return { title: 'Interview Analytics', icon: Activity, subtitle: 'Trends & candidate feedback comparison' };
       case 'reports':
         return { title: 'Reports & Transcripts', icon: FileText, subtitle: 'Video evidence & AI transcripts' };
       case 'database':
