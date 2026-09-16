@@ -310,55 +310,63 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
         setRecordingPlayable(false);
         setTestingRecording(true);
 
-        const videoUrl = URL.createObjectURL(completeBlob);
-        setRecordedVideoUrl(videoUrl);
-
-        // Step 1: immediately persist the complete recording locally as a temporary
-        // preview copy. Nothing is uploaded to the interviewer yet.
+        // MediaRecorder output is a container/codec Blob. Do not infer that it is
+        // invalid merely because metadata probing is unreliable on a browser.
+        // Persist the exact bytes first, then verify by actually loading them.
         const currentQ = sessionData?.questions?.[currentQIndex];
         const vidId = `vid-${currentQ?.id || 'q'}-${Date.now()}`;
         currentSavedVideoIdRef.current = vidId;
-        try {
-          await saveVideoBlob(vidId, completeBlob, finalDuration);
-        } catch (err) {
-          console.warn('Temporary local video storage error:', err);
-          setCameraError('The recording could not be saved for preview. Please re-record before submitting.');
-          setRecordingPlayable(false);
-        }
 
-        // Verify that the assembled Blob is actually readable by this browser
-        // before allowing submission. Individual MediaRecorder chunks are not
-        // necessarily playable until they are reassembled in onstop.
         try {
+          const savedPreviewUrl = await saveVideoBlob(vidId, completeBlob, finalDuration);
+          setRecordedVideoUrl(savedPreviewUrl);
+
           const probe = document.createElement('video');
-          probe.preload = 'metadata';
-          probe.src = videoUrl;
+          probe.preload = 'auto';
+          probe.muted = true;
+          probe.playsInline = true;
+          probe.src = savedPreviewUrl;
+
           await new Promise<void>((resolve, reject) => {
+            let settled = false;
+            const finish = (fn: () => void) => {
+              if (settled) return;
+              settled = true;
+              window.clearTimeout(timeout);
+              fn();
+            };
             const timeout = window.setTimeout(
-              () => reject(new Error('Timed out while validating the recording')),
-              5000
+              () => finish(() => reject(new Error('Timed out while loading the saved recording'))),
+              10000
             );
-            probe.onloadedmetadata = () => {
-              window.clearTimeout(timeout);
-              resolve();
-            };
-            probe.onerror = () => {
-              window.clearTimeout(timeout);
-              reject(new Error('The browser could not decode the recorded media'));
-            };
+            probe.onloadeddata = () => finish(resolve);
+            probe.oncanplay = () => finish(resolve);
+            probe.onerror = () => finish(() => reject(new Error('Saved recording cannot be decoded by this browser')));
           });
+
           if (!Number.isFinite(probe.duration) || probe.duration <= 0) {
-            throw new Error('The recording has no valid media duration');
+            // Some WebM implementations expose duration only after enough data is
+            // buffered. Try seeking to the end before rejecting.
+            try {
+              probe.currentTime = Math.max(0, finalDuration - 0.25);
+              await new Promise<void>((resolve, reject) => {
+                const t = window.setTimeout(() => reject(new Error('No usable duration')), 3000);
+                probe.onseeked = () => { window.clearTimeout(t); resolve(); };
+                probe.onerror = () => { window.clearTimeout(t); reject(new Error('Seek failed')); };
+              });
+            } catch {
+              throw new Error('Saved recording has no usable media duration');
+            }
           }
-          probe.removeAttribute('src');
-          probe.load();
+
+          // Successful decode is the actual playability check.
           setRecordingPlayable(true);
           setCameraError(null);
         } catch (validationError: any) {
-          console.warn('Recorded media failed browser playability validation:', validationError);
+          console.error('Saved recording validation failed:', validationError);
           setRecordingPlayable(false);
           setCameraError(
-            'This recording cannot be previewed or verified by your browser. It has NOT been submitted. Please use Re-Record and try again.'
+            'The recording was saved, but this browser could not play it back. Please use Re-Record. The recording has not been submitted.'
           );
         } finally {
           setTestingRecording(false);
