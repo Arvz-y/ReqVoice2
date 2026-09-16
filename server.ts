@@ -284,6 +284,64 @@ let interviewsDb: StoredInterview[] = [];
 
 let activitiesDb: StoredActivity[] = [];
 
+// Dedicated server-side SQLite video database. The database stores the complete
+// original recording plus an optional H.264/AAC delivery copy as BLOBs.
+// Set VIDEO_DATABASE_PATH to a persistent Render Disk path in production.
+const videoDatabasePath = path.resolve(
+  process.env.VIDEO_DATABASE_PATH || path.join(process.cwd(), "video-vault", "videos.sqlite")
+);
+fs.mkdirSync(path.dirname(videoDatabasePath), { recursive: true });
+const videoDatabase = new DatabaseSync(videoDatabasePath);
+videoDatabase.exec(
+  'PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; ' +
+  'CREATE TABLE IF NOT EXISTS interview_videos (' +
+  'id TEXT PRIMARY KEY, interview_id TEXT NOT NULL, question_id TEXT, ' +
+  'mime_type TEXT NOT NULL, source_mime_type TEXT NOT NULL, delivery_mime_type TEXT NOT NULL, ' +
+  'original_extension TEXT NOT NULL, original_blob BLOB NOT NULL, delivery_blob BLOB, ' +
+  'duration_seconds REAL NOT NULL DEFAULT 0, recorded_at TEXT NOT NULL, created_at TEXT NOT NULL' +
+  '); ' +
+  'CREATE INDEX IF NOT EXISTS idx_interview_videos_interview_question ON interview_videos(interview_id, question_id);'
+);
+console.log('Video database:', videoDatabasePath);
+
+const saveVideoToDatabase = (record: {
+  id: string;
+  interviewId: string;
+  questionId?: string;
+  sourceMimeType: string;
+  sourceExtension: string;
+  originalBuffer: Buffer;
+  deliveryMimeType: string;
+  deliveryBuffer?: Buffer | null;
+  durationSeconds: number;
+  recordedAt: string;
+}) => {
+  const stmt = videoDatabase.prepare(
+    'INSERT INTO interview_videos (id, interview_id, question_id, mime_type, source_mime_type, delivery_mime_type, original_extension, original_blob, delivery_blob, duration_seconds, recorded_at, created_at) ' +
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+    'ON CONFLICT(id) DO UPDATE SET interview_id=excluded.interview_id, question_id=excluded.question_id, mime_type=excluded.mime_type, source_mime_type=excluded.source_mime_type, delivery_mime_type=excluded.delivery_mime_type, original_extension=excluded.original_extension, original_blob=excluded.original_blob, delivery_blob=excluded.delivery_blob, duration_seconds=excluded.duration_seconds, recorded_at=excluded.recorded_at'
+  );
+  stmt.run(record.id, record.interviewId, record.questionId || null, record.deliveryMimeType, record.sourceMimeType, record.deliveryMimeType, record.sourceExtension, record.originalBuffer, record.deliveryBuffer || null, record.durationSeconds || 0, record.recordedAt, new Date().toISOString());
+};
+
+const getVideoDatabaseRecord = (videoId: string) => {
+  const row = videoDatabase.prepare('SELECT * FROM interview_videos WHERE id = ?').get(videoId) as any;
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    interviewId: String(row.interview_id),
+    questionId: row.question_id ? String(row.question_id) : undefined,
+    sourceMimeType: String(row.source_mime_type),
+    deliveryMimeType: String(row.delivery_mime_type),
+    originalExtension: String(row.original_extension),
+    originalBuffer: Buffer.from(row.original_blob as Uint8Array),
+    deliveryBuffer: row.delivery_blob ? Buffer.from(row.delivery_blob as Uint8Array) : null,
+    durationSeconds: Number(row.duration_seconds) || 0,
+    recordedAt: String(row.recorded_at),
+  };
+};
+
+// Short-lived compatibility cache for legacy code; SQLite is authoritative.
 const videosStore = new Map<string, StoredVideo>();
 
 // Render's default filesystem is ephemeral. Set VIDEO_STORAGE_DIR to a mounted
@@ -1104,6 +1162,44 @@ app.get("/api/share/:token", (req: Request, res: Response) => {
   });
 });
 
+// Binary video upload. The browser sends the Blob directly instead of embedding it in JSON/base64.
+app.post(
+  "/api/share/:token/video",
+  express.raw({ type: ["video/*", "application/octet-stream"], limit: "250mb" }),
+  async (req: Request, res: Response) => {
+    const interview = interviewsDb.find((i) => i.shareToken === req.params.token);
+    if (!interview) { res.status(404).json({ error: "Interview session expired or not found." }); return; }
+    const questionId = String(req.headers["x-question-id"] || "");
+    const videoId = String(req.headers["x-video-id"] || "");
+    const durationSeconds = Number(req.headers["x-duration-seconds"] || 0) || 0;
+    const question = interview.questions.find((q) => q.id === questionId);
+    if (!question || !videoId) { res.status(400).json({ error: "Video upload is missing a valid question or video ID." }); return; }
+    const videoBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || []);
+    if (videoBuffer.length < 1024) { res.status(422).json({ code: "VIDEO_TOO_SMALL", error: `The recording is incomplete (${videoBuffer.length} bytes received). Please record again.` }); return; }
+    const detected = detectVideoContainer(videoBuffer);
+    if (!detected) { res.status(422).json({ code: "VIDEO_CONTAINER_INVALID", error: "The recording is not a recognized MP4, WebM, or Ogg media container." }); return; }
+    const recordedAt = new Date().toISOString();
+    const originalPath = getVideoFilePath(videoId, detected.extension);
+    try {
+      fs.writeFileSync(originalPath, videoBuffer);
+      if (fs.statSync(originalPath).size !== videoBuffer.length) throw new Error("The complete video payload was not written to storage.");
+      let deliveryMimeType = detected.mimeType;
+      let deliveryBuffer: Buffer | null = detected.extension === "mp4" ? videoBuffer : null;
+      if (detected.extension !== "mp4") {
+        const compatibleMp4 = await transcodeToCompatibleMp4(videoId, originalPath);
+        if (compatibleMp4 && fs.existsSync(compatibleMp4)) {
+          const candidate = fs.readFileSync(compatibleMp4);
+          if (candidate.length > 1024) { deliveryBuffer = candidate; deliveryMimeType = "video/mp4"; }
+        }
+      }
+      saveVideoToDatabase({ id: videoId, interviewId: interview.id, questionId, sourceMimeType: detected.mimeType, sourceExtension: detected.extension, originalBuffer: videoBuffer, deliveryMimeType, deliveryBuffer, durationSeconds, recordedAt });
+      res.status(201).json({ success: true, videoRecording: { id: videoId, durationSeconds, mimeType: deliveryMimeType, sourceMimeType: detected.mimeType, deliveryMimeType, storageStatus: "saved", storagePath: `video_database/interview_videos/${videoId}`, videoUrl: `/api/videos/${videoId}/playback`, recordedAt } });
+    } catch (error: any) {
+      console.error("Video database upload failed:", error);
+      res.status(500).json({ code: "VIDEO_DATABASE_WRITE_FAILED", error: "The recording could not be saved to the video database. Please try the upload again.", details: process.env.NODE_ENV === "production" ? undefined : error?.message, retryable: true });
+    }
+  }
+);
 app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
   const interview = interviewsDb.find((i) => i.shareToken === req.params.token);
   if (!interview) {
@@ -1221,12 +1317,14 @@ app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
 
 // Video playback endpoints. These are independent from transcription so a
 // recorded answer remains playable even when AI analysis fails.
-const resolveStoredVideo = (videoId: string): { buffer: Buffer; mimeType: string } | null => {
-  const cached = videosStore.get(videoId);
-  if (cached?.buffer?.length) {
-    return { buffer: cached.buffer, mimeType: cached.mimeType || "video/webm" };
+const resolveStoredVideo = (videoId: string, preferDelivery = false): { buffer: Buffer; mimeType: string } | null => {
+  const dbRecord = getVideoDatabaseRecord(videoId);
+  if (dbRecord) {
+    if (preferDelivery && dbRecord.deliveryBuffer?.length) return { buffer: dbRecord.deliveryBuffer, mimeType: dbRecord.deliveryMimeType };
+    return { buffer: dbRecord.originalBuffer, mimeType: dbRecord.sourceMimeType };
   }
-
+  const cached = videosStore.get(videoId);
+  if (cached?.buffer?.length) return { buffer: cached.buffer, mimeType: cached.mimeType || "video/webm" };
   const original = findOriginalVideoPath(videoId);
   if (!original) return null;
   return { buffer: fs.readFileSync(original.path), mimeType: original.mimeType };
@@ -1273,7 +1371,7 @@ const streamStoredVideo = (req: Request, res: Response, download = false) => {
   res.end(stored.buffer.subarray(start, end + 1));
 };
 
-const streamFileWithRanges = (req: Request, res: Response, filePath: string, mimeType: string, downloadName?: string) => {
+const streamBufferWithRanges = (req: Request, res: Response, buffer: Buffer, mimeType: string, downloadName?: string) => {,  const total = buffer.length;,  if (!total) { res.status(404).json({ error: "Recorded video is empty." }); return; },  res.setHeader("Accept-Ranges", "bytes");,  res.setHeader("Content-Type", mimeType);,  res.setHeader("Cache-Control", "private, max-age=3600");,  if (downloadName) res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);,  const range = req.headers.range;,  if (!range) { res.setHeader("Content-Length", total); res.status(200).end(buffer); return; },  const match = /^bytes=(\\d*)-(\\d*)$/.exec(range);,  if (!match) { res.status(416).setHeader("Content-Range", `bytes */${total}`).end(); return; },  const start = match[1] ? Number(match[1]) : Math.max(0, total - Number(match[2] || 1));,  const end = match[2] ? Math.min(total - 1, Number(match[2])) : total - 1;,  if (start > end || start >= total) { res.status(416).setHeader("Content-Range", `bytes */${total}`).end(); return; },  res.status(206);,  res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);,  res.setHeader("Content-Length", end - start + 1);,  res.end(buffer.subarray(start, end + 1));,};,const streamFileWithRanges = (req: Request, res: Response, filePath: string, mimeType: string, downloadName?: string) => {
   if (!fs.existsSync(filePath)) {
     res.status(404).json({ error: "Recorded video file not found." });
     return;
@@ -1319,51 +1417,25 @@ app.get("/api/videos/:id", (req: Request, res: Response) => {
 
 // Always prefer an H.264/AAC MP4 for browser and OS/default-player compatibility.
 // Conversion is lazy and cached, so recordings are not blocked by AI transcription.
-app.get("/api/videos/:id/playback", async (req: Request, res: Response) => {
-  const videoId = req.params.id;
-  const original = findOriginalVideoPath(videoId);
-  if (!original) {
-    res.status(404).json({ error: "Recorded video not found." });
-    return;
-  }
-
-  if (original.extension === "mp4") {
-    streamFileWithRanges(req, res, original.path, "video/mp4");
-    return;
-  }
-
-  const mp4Path = await transcodeToCompatibleMp4(videoId, original.path);
-  if (mp4Path) {
-    streamFileWithRanges(req, res, mp4Path, "video/mp4");
-    return;
-  }
-
-  // If conversion is unavailable, preserve access to the original evidence.
-  streamFileWithRanges(req, res, original.path, original.mimeType);
+app.get("/api/videos/:id/playback", (req: Request, res: Response) => {
+  const stored = resolveStoredVideo(req.params.id, true);
+  if (!stored) { res.status(404).json({ error: "Recorded video not found." }); return; }
+  streamBufferWithRanges(req, res, stored.buffer, stored.mimeType);
 });
 
-app.get("/api/videos/:id/download", async (req: Request, res: Response) => {
-  const videoId = req.params.id;
-  const original = findOriginalVideoPath(videoId);
-  if (!original) {
-    res.status(404).json({ error: "Recorded video not found." });
+app.get("/api/videos/:id/download", (req: Request, res: Response) => {
+  const record = getVideoDatabaseRecord(req.params.id);
+  if (record) {
+    const buffer = record.deliveryBuffer?.length ? record.deliveryBuffer : record.originalBuffer;
+    const mime = record.deliveryBuffer?.length ? record.deliveryMimeType : record.sourceMimeType;
+    const ext = mime.includes("mp4") ? "mp4" : mime.includes("ogg") ? "ogg" : "webm";
+    streamBufferWithRanges(req, res, buffer, mime, `reqvoice_recording_${req.params.id}.${ext}`);
     return;
   }
-
-  if (original.extension === "mp4") {
-    streamFileWithRanges(req, res, original.path, "video/mp4", `reqvoice_recording_${videoId}.mp4`);
-    return;
-  }
-
-  const mp4Path = await transcodeToCompatibleMp4(videoId, original.path);
-  if (mp4Path) {
-    streamFileWithRanges(req, res, mp4Path, "video/mp4", `reqvoice_recording_${videoId}.mp4`);
-    return;
-  }
-
-  streamFileWithRanges(req, res, original.path, original.mimeType, `reqvoice_recording_${videoId}.${original.extension}`);
+  const original = findOriginalVideoPath(req.params.id);
+  if (!original) { res.status(404).json({ error: "Recorded video not found." }); return; }
+  streamFileWithRanges(req, res, original.path, original.mimeType, `reqvoice_recording_${req.params.id}.${original.extension}`);
 });
-
 // 5. AI Video & Audio Transcription Endpoint using Gemini API
 app.post("/api/gemini/transcribe-video", async (req: Request, res: Response) => {
   const { base64Media, mimeType, questionText, category, durationSeconds } = req.body;
