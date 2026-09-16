@@ -782,7 +782,7 @@ app.post("/api/interviews", (req: Request, res: Response) => {
   }
 });
 
-app.post("/api/interviews/:id/response", (req: Request, res: Response) => {
+app.post("/api/interviews/:id/response", async (req: Request, res: Response) => {
   const interview = interviewsDb.find((i) => i.id === req.params.id);
   if (!interview) {
     res.status(404).json({ error: "Interview not found" });
