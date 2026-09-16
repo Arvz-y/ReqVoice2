@@ -208,9 +208,7 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
   const [manualRationale, setManualRationale] = useState('');
 
   // Configured Questions list initialized with Semi-Structured template
-  const [questions, setQuestions] = useState<Partial<InterviewQuestion>[]>(
-    INTERVIEW_TYPE_DETAILS['Semi-Structured'].questions
-  );
+  const [questions, setQuestions] = useState<Partial<InterviewQuestion>[]>([]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -223,11 +221,26 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
   const handleSelectInterviewType = (type: InterviewType) => {
     setInterviewType(type);
     setAiPrompt(INTERVIEW_TYPE_DETAILS[type].defaultPrompt);
+    setQuestions([]);
+    setGeneratedRevision(0);
+    setLastGeneratedPrompt('');
     setPromptVersion((v) => v + 1);
   };
 
   const handlePromptChange = (value: string) => {
     setAiPrompt(value);
+    setQuestions([]);
+    setGeneratedRevision(0);
+    setLastGeneratedPrompt('');
+    setPromptVersion((v) => v + 1);
+  };
+
+  const handleResetPrompt = () => {
+    const nextPrompt = INTERVIEW_TYPE_DETAILS[interviewType].defaultPrompt;
+    setAiPrompt(nextPrompt);
+    setQuestions([]);
+    setGeneratedRevision(0);
+    setLastGeneratedPrompt('');
     setPromptVersion((v) => v + 1);
   };
 
@@ -327,7 +340,11 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
       return;
     }
     if (questions.length === 0) {
-      setValidationError('Please add at least one question to the questionnaire before creating the session.');
+      setValidationError('Please generate or add at least one question before creating the session.');
+      return;
+    }
+    if (creationMode === 'ai' && generatedRevision !== promptVersion) {
+      setValidationError('The prompt has changed. Generate fresh questions before creating this interview session.');
       return;
     }
 
@@ -631,7 +648,7 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => setAiPrompt(INTERVIEW_TYPE_DETAILS[interviewType].defaultPrompt)}
+                    onClick={handleResetPrompt}
                     className="text-[10px] text-indigo-300 hover:text-indigo-200 underline cursor-pointer"
                   >
                     Reset prompt to {interviewType} template
@@ -670,7 +687,7 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
                   <button
                     type="button"
                     onClick={handlePromptAI}
-                    disabled={isGeneratingAI}
+                    disabled={isGeneratingAI || !aiPrompt.trim()}
                     className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all cursor-pointer disabled:opacity-50"
                   >
                     <Sparkles className={`w-3.5 h-3.5 ${isGeneratingAI ? 'animate-spin' : ''}`} />
