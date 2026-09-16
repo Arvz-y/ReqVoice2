@@ -245,24 +245,58 @@ export const api = {
         responses: Record<string, any>;
       }>(`/api/share/${token}`),
     uploadVideo: async (token: string, questionId: string, videoId: string, blob: Blob, durationSeconds: number) => {
-      const headers: Record<string, string> = {
-        'Content-Type': blob.type || 'application/octet-stream',
-        'X-Question-ID': questionId,
-        'X-Video-ID': videoId,
-        'X-Duration-Seconds': String(durationSeconds || 0),
-      };
-      let response: Response;
-      try {
-        response = await fetch('/api/share/' + token + '/video', { method: 'POST', headers, body: blob });
-      } catch (err: any) {
-        throw new Error('Unable to upload the recording. ' + (err?.message || 'Please check your connection and try again.'));
+      // Send the recording in small binary chunks. This avoids reverse-proxy/body-size
+      // and timeout failures on Render while preserving the exact original bytes.
+      const CHUNK_SIZE = 5 * 1024 * 1024;
+      const total = blob.size;
+      let offset = 0;
+
+      while (offset < total) {
+        const end = Math.min(offset + CHUNK_SIZE, total);
+        const chunk = blob.slice(offset, end);
+        const isFinal = end >= total;
+        let response: Response;
+
+        try {
+          response = await fetch('/api/share/' + token + '/video', {
+            method: 'POST',
+            headers: {
+              'Content-Type': blob.type || 'application/octet-stream',
+              'X-Question-ID': questionId,
+              'X-Video-ID': videoId,
+              'X-Duration-Seconds': String(durationSeconds || 0),
+              'X-Upload-Offset': String(offset),
+              'X-Upload-Total': String(total),
+              'X-Upload-Final': String(isFinal),
+            },
+            body: chunk,
+          });
+        } catch (err: any) {
+          throw new Error('Unable to upload the recording. ' + (err?.message || 'Please check your connection and try again.'));
+        }
+
+        if (!response.ok) {
+          let message = 'Video upload failed (' + response.status + ')';
+          try {
+            const payload = await response.json();
+            if (payload?.error) message = payload.error;
+            if (payload?.expectedOffset !== undefined) {
+              message += ' Please restart the recording upload.';
+            }
+          } catch {}
+          throw new Error(message);
+        }
+
+        const payload = await response.json();
+        if (isFinal) return payload as { success: boolean; videoRecording: any };
+
+        offset = Number(payload.receivedBytes);
+        if (!Number.isFinite(offset) || offset <= 0 || offset > total) {
+          throw new Error('The server returned an invalid video upload position. Please record again.');
+        }
       }
-      if (!response.ok) {
-        let message = 'Video upload failed (' + response.status + ')';
-        try { const payload = await response.json(); if (payload?.error) message = payload.error; } catch {}
-        throw new Error(message);
-      }
-      return response.json() as Promise<{ success: boolean; videoRecording: any }>;
+
+      throw new Error('The recording upload ended unexpectedly.');
     },
     submitAnswer: (
       token: string,
