@@ -281,7 +281,8 @@ const DEFAULT_QUESTIONS: StoredQuestion[] = SEMI_STRUCTURED_QUESTIONS;
 
 let systemsDb: StoredSystem[] = [];
 
-let interviewsDb: StoredInterview[] = [];
+let interviewsDb: StoredInterview[] = loadInterviewsFromDatabase();
+console.log(`Loaded ${interviewsDb.length} persisted interview session(s).`);
 
 let activitiesDb: StoredActivity[] = [];
 
@@ -304,6 +305,56 @@ videoDatabase.exec(
   'CREATE INDEX IF NOT EXISTS idx_interview_videos_interview_question ON interview_videos(interview_id, question_id);'
 );
 console.log('Video database:', videoDatabasePath);
+
+// Persist interview sessions in the same SQLite database. Render can restart or
+// redeploy a web service at any time; keeping interviews only in a process-local
+// array makes a public interview link suddenly look expired even when the
+// interviewee just recorded an answer.
+videoDatabase.exec(
+  'CREATE TABLE IF NOT EXISTS interview_sessions (' +
+  'id TEXT PRIMARY KEY, user_id TEXT NOT NULL, system_id TEXT NOT NULL, ' +
+  'share_token TEXT NOT NULL UNIQUE, session_json TEXT NOT NULL, updated_at TEXT NOT NULL' +
+  '); ' +
+  'CREATE INDEX IF NOT EXISTS idx_interview_sessions_share_token ON interview_sessions(share_token);'
+);
+
+const saveInterviewToDatabase = (interview: StoredInterview) => {
+  const stmt = videoDatabase.prepare(
+    'INSERT INTO interview_sessions (id, user_id, system_id, share_token, session_json, updated_at) ' +
+    'VALUES (?, ?, ?, ?, ?, ?) ' +
+    'ON CONFLICT(id) DO UPDATE SET user_id=excluded.user_id, system_id=excluded.system_id, share_token=excluded.share_token, session_json=excluded.session_json, updated_at=excluded.updated_at'
+  );
+  stmt.run(
+    interview.id,
+    interview.userId,
+    interview.systemId,
+    interview.shareToken,
+    JSON.stringify(interview),
+    new Date().toISOString()
+  );
+};
+
+const deleteInterviewFromDatabase = (interviewId: string) => {
+  videoDatabase.prepare('DELETE FROM interview_sessions WHERE id = ?').run(interviewId);
+};
+
+const loadInterviewsFromDatabase = (): StoredInterview[] => {
+  const rows = videoDatabase.prepare(
+    'SELECT session_json FROM interview_sessions ORDER BY updated_at DESC'
+  ).all() as any[];
+  const loaded: StoredInterview[] = [];
+  for (const row of rows) {
+    try {
+      const interview = JSON.parse(String(row.session_json)) as StoredInterview;
+      if (interview?.id && interview?.shareToken && Array.isArray(interview.questions) && interview.responses) {
+        loaded.push(interview);
+      }
+    } catch (error) {
+      console.warn('Skipping corrupt persisted interview session:', error);
+    }
+  }
+  return loaded;
+};
 
 const saveVideoToDatabase = (record: {
   id: string;
@@ -757,7 +808,9 @@ app.delete("/api/systems/:id", (req: Request, res: Response) => {
   const removedSystem = systemsDb.splice(sysIndex, 1)[0];
 
   // Also remove associated interviews if any
+  const removedInterviewIds = interviewsDb.filter((inv) => inv.systemId === systemId).map((inv) => inv.id);
   interviewsDb = interviewsDb.filter((inv) => inv.systemId !== systemId);
+  removedInterviewIds.forEach(deleteInterviewFromDatabase);
 
   activitiesDb.unshift({
     id: `act-${Date.now().toString(36)}`,
@@ -850,6 +903,7 @@ app.post("/api/interviews", (req: Request, res: Response) => {
   };
 
   interviewsDb.unshift(newInterview);
+  saveInterviewToDatabase(newInterview);
 
   activitiesDb.unshift({
     id: `act-${Date.now().toString(36)}`,
@@ -998,6 +1052,7 @@ app.post("/api/interviews/:id/response", async (req: Request, res: Response) => 
   };
 
   interview.responses[questionId] = responseObj;
+  saveInterviewToDatabase(interview);
 
   if (interview.userId) {
     activitiesDb.unshift({
@@ -1022,6 +1077,7 @@ app.post("/api/interviews/:id/finish", async (req: Request, res: Response) => {
 
   interview.status = "completed";
   interview.completedAt = new Date().toISOString();
+  saveInterviewToDatabase(interview);
 
   // Synthesize AI Summary Report
   const responsesList = Object.values(interview.responses);
@@ -1115,6 +1171,7 @@ Synthesize an executive requirements report in JSON with this exact structure:
     };
   }
 
+  saveInterviewToDatabase(interview);
   res.json({ interview, summaryReport: interview.summaryReport });
 });
 
@@ -1130,6 +1187,7 @@ app.delete("/api/interviews/:id", (req: Request, res: Response) => {
     return;
   }
   interviewsDb = interviewsDb.filter((i) => i.id !== req.params.id);
+  deleteInterviewFromDatabase(req.params.id);
   res.json({ success: true });
 });
 
