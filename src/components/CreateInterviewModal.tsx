@@ -201,6 +201,7 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [promptVersion, setPromptVersion] = useState(1);
   const [lastGeneratedPrompt, setLastGeneratedPrompt] = useState('');
+  const [generatedRevision, setGeneratedRevision] = useState(0);
 
   // Manual Question Builder State
   const [manualText, setManualText] = useState('');
