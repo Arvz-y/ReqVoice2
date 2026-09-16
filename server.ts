@@ -1142,17 +1142,26 @@ Format as JSON array of objects:
   }
 ]`;
 
+      // Use currently supported stable text-generation models first.
+      // Do not let an old/unsupported Render GEMINI_QUESTION_MODEL value
+      // override the working Flash models.
+      const requestedModel = process.env.GEMINI_QUESTION_MODEL?.trim();
       const modelCandidates = [
-        process.env.GEMINI_QUESTION_MODEL,
         "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-001",
-        "gemini-2.5-pro",
-      ].filter(Boolean) as string[];
+        "gemini-3.5-flash",
+        ...(requestedModel && ![
+          "gemini-2.5-pro",
+          "gemini-2.0-flash",
+          "gemini-2.0-flash-001",
+          "gemini-2.0-flash-lite",
+          "gemini-2.0-flash-lite-001",
+        ].includes(requestedModel) ? [requestedModel] : []),
+      ].filter((model, index, all) => all.indexOf(model) === index);
 
       let response: any;
       let lastModelError: any;
+      const modelErrors: string[] = [];
 
       const apiKey =
         process.env.GEMINI_API_KEY ||
@@ -1197,10 +1206,12 @@ Format as JSON array of objects:
               `Gemini REST ${restResponse.status}: ${restBody?.error?.message || "No response text"}`
             );
             lastGeminiQuestionError = lastModelError.message;
+            modelErrors.push(`${modelName}: ${lastGeminiQuestionError}`);
             console.warn("Gemini REST question model failed:", modelName, lastGeminiQuestionError);
           } catch (modelError: any) {
             lastModelError = modelError;
             lastGeminiQuestionError = modelError?.message || String(modelError);
+            modelErrors.push(`${modelName}: ${lastGeminiQuestionError}`);
             console.warn("Gemini REST request failed:", modelName, lastGeminiQuestionError);
           }
         }
@@ -1223,6 +1234,7 @@ Format as JSON array of objects:
           } catch (modelError: any) {
             lastModelError = modelError;
             lastGeminiQuestionError = modelError?.message || String(modelError);
+            modelErrors.push(`${modelName}: ${lastGeminiQuestionError}`);
             console.warn("Gemini SDK question model failed:", modelName, lastGeminiQuestionError);
           }
         }
@@ -1260,7 +1272,7 @@ Format as JSON array of objects:
   );
   res.status(503).json({
     error: hasApiKey
-      ? `AI question generation failed. ${lastGeminiQuestionError || "Gemini did not return a usable response."} No generic questions were substituted.`
+      ? `AI question generation failed. ${modelErrors.length ? modelErrors.join(" | ") : (lastGeminiQuestionError || "Gemini did not return a usable response.")} No generic questions were substituted.`
       : "Gemini API credentials are not configured on the server. Set GEMINI_API_KEY in the Render Environment variables. No generic questions were substituted.",
     promptVersion: revision,
   });
