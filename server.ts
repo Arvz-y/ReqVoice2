@@ -711,6 +711,136 @@ async function persistSystemRemotely(system: StoredSystem): Promise<void> {
   if (error) throw new Error("Supabase system save failed: " + error.message);
 }
 
+async function ensureDemoAccount(): Promise<void> {
+  if (!supabase || !supabaseAuth) {
+    console.warn("[DEMO] Supabase is not configured; demo account persistence is unavailable.");
+    return;
+  }
+
+  const demoEmail = (process.env.REQVOICE_DEMO_EMAIL || "demo@reqvoice.app").trim().toLowerCase();
+  const demoUsername = (process.env.REQVOICE_DEMO_USERNAME || "demo").trim().toLowerCase();
+  const demoPassword = process.env.REQVOICE_DEMO_PASSWORD || "Demo@ReqVoice2";
+  const demoName = "ReqVoice Demo Account";
+  const demoRole = "Requirements Engineer";
+  const demoDepartment = "Systems Engineering";
+
+  try {
+    let profile: StoredUser | undefined = usersDb.find(
+      (u) => u.username.toLowerCase() === demoUsername || u.email.toLowerCase() === demoEmail
+    );
+
+    if (!profile) {
+      const { data: existingProfile, error: profileLookupError } = await supabase
+        .from("app_users")
+        .select("*")
+        .or(`username.eq.${demoUsername},email.eq.${demoEmail}`)
+        .maybeSingle();
+      if (profileLookupError) throw new Error("Demo profile lookup failed: " + profileLookupError.message);
+
+      if (existingProfile) {
+        profile = {
+          id: existingProfile.id,
+          name: existingProfile.name,
+          username: existingProfile.username,
+          email: existingProfile.email,
+          password: existingProfile.password || "",
+          role: existingProfile.role,
+          department: existingProfile.department,
+          avatarUrl: existingProfile.avatar_url || "",
+          bio: existingProfile.bio || "",
+          isFirstTime: !!existingProfile.is_first_time,
+          hasCompletedTutorial: !!existingProfile.has_completed_tutorial,
+          createdAt: existingProfile.created_at,
+        };
+        usersDb.push(profile);
+      }
+    }
+
+    if (!profile) {
+      const { data: createdAuth, error: authError } = await supabase.auth.admin.createUser({
+        email: demoEmail,
+        password: demoPassword,
+        email_confirm: true,
+        user_metadata: {
+          name: demoName,
+          username: demoUsername,
+          role: demoRole,
+          department: demoDepartment,
+          is_demo: true,
+        },
+      });
+
+      if (authError || !createdAuth.user) {
+        throw new Error(authError?.message || "Unable to create the persistent demo authentication account.");
+      }
+
+      profile = {
+        id: createdAuth.user.id,
+        name: demoName,
+        username: demoUsername,
+        email: demoEmail,
+        password: "",
+        role: demoRole,
+        department: demoDepartment,
+        avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=${demoUsername}`,
+        bio: "Persistent ReqVoice demonstration account for testing interviews and analytics.",
+        isFirstTime: false,
+        hasCompletedTutorial: true,
+        createdAt: new Date().toISOString(),
+      };
+
+      await persistUserRemotely(profile);
+      usersDb.push(profile);
+      console.log("[DEMO] Created persistent demo account:", demoUsername);
+    }
+
+    const demoSystemName = "[DEMO] University Student Information System";
+    let demoSystem = systemsDb.find((s) => s.userId === profile!.id && s.name === demoSystemName);
+    if (!demoSystem) {
+      const { data: remoteSystems, error: systemError } = await supabase
+        .from("app_systems")
+        .select("*")
+        .eq("user_id", profile.id)
+        .eq("name", demoSystemName)
+        .limit(1);
+      if (systemError) throw new Error("Demo system lookup failed: " + systemError.message);
+      const remote = remoteSystems?.[0];
+      if (remote) {
+        demoSystem = {
+          id: remote.id,
+          userId: remote.user_id,
+          name: remote.name,
+          type: remote.type,
+          description: remote.description || "",
+          lifecycleState: remote.lifecycle_state,
+          targetRoles: Array.isArray(remote.target_roles) ? remote.target_roles : [],
+          createdAt: remote.created_at,
+        };
+        systemsDb.unshift(demoSystem);
+      }
+    }
+
+    if (!demoSystem) {
+      demoSystem = {
+        id: `sys-demo-${profile.id.replace(/[^a-zA-Z0-9]/g, "").slice(-12)}`,
+        userId: profile.id,
+        name: demoSystemName,
+        type: "Student Information System",
+        description: "Synthetic demonstration dataset for testing interview analytics, answer persistence, refresh behavior, and AI analysis.",
+        lifecycleState: "existing",
+        targetRoles: ["Registrar", "Student", "Instructor", "IT Administrator", "Department Staff"],
+        createdAt: new Date().toISOString(),
+      };
+      await persistSystemRemotely(demoSystem);
+      systemsDb.unshift(demoSystem);
+    }
+
+    console.log("[DEMO] Persistent demo account ready:", demoUsername, demoEmail, "system:", demoSystem.id);
+  } catch (error: any) {
+    console.error("[DEMO] Failed to ensure persistent demo account:", error?.message || error);
+  }
+}
+
 // ========================
 // API ROUTES
 // ========================
@@ -3572,6 +3702,7 @@ app.use(express.static(distPath));
 
   if (supabase) {
     try { await loadUsersFromSupabase(); await loadSystemsFromSupabase(); } catch (error: any) { console.error("Persistent account/workspace load failed:", error?.message || error); }
+    await ensureDemoAccount();
   }
 
   const server = app.listen(PORT, "0.0.0.0", () => {
