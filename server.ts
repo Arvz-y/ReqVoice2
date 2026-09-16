@@ -1336,6 +1336,153 @@ app.post("/api/interviews/:id/response", async (req: Request, res: Response) => 
   res.json({ success: true, response: responseObj });
 });
 
+
+app.post("/api/demo/generate", async (req: Request, res: Response) => {
+  const user = getAuthUser(req);
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const DEMO_VERSION = "REQVOICE_DEMO_DATASET_V1";
+  const DEMO_SYSTEM_NAME = "[DEMO] University Student Information System";
+  try {
+    const existingSystems = supabase ? await loadRemoteSystemsForUser(user.id) : systemsDb.filter((x) => x.userId === user.id);
+    let system = existingSystems.find((x: any) => x.name === DEMO_SYSTEM_NAME) as StoredSystem | undefined;
+    if (!system) {
+      system = {
+        id: \`sys-demo-\${user.id.replace(/[^a-zA-Z0-9]/g, "").slice(-12)}\`,
+        userId: user.id,
+        name: DEMO_SYSTEM_NAME,
+        type: "Student Information System",
+        description: "Synthetic demonstration dataset for testing interview analytics, answer persistence, refresh behavior, and AI analysis.",
+        lifecycleState: "existing",
+        targetRoles: ["Registrar", "Student", "Instructor", "IT Administrator", "Department Staff"],
+        createdAt: new Date().toISOString(),
+      };
+      if (supabase) await persistSystemRemotely(system);
+      systemsDb.unshift(system);
+    }
+
+    const existing = (supabase ? await getRemoteInterviewsForUser(user.id) : interviewsDb.filter((x) => x.userId === user.id))
+      .filter((x) => x.systemId === system!.id && x.prompt === DEMO_VERSION);
+    if (existing.length >= 5) {
+      res.json({ success: true, created: 0, existing: existing.length, system, interviews: existing });
+      return;
+    }
+
+    const people = [
+      ["Maria Santos", "Registrar", "Registrar's Office"],
+      ["Joshua Reyes", "Student", "College of Information Systems"],
+      ["Angela Cruz", "Instructor", "College of Information Systems"],
+      ["Daniel Garcia", "IT Administrator", "Information Technology Services"],
+      ["Liza Mendoza", "Department Staff", "Academic Affairs"],
+    ];
+    const answers = [
+      [
+        "Enrollment is still mostly manual. Staff verify student records, subjects, prerequisites, and payment status across several screens. During peak enrollment, the process becomes slow.",
+        "The biggest issue is duplicate encoding and long queues. Students often wait while staff check records in multiple places.",
+        "We need a single workflow that validates prerequisites and outstanding balances before enrollment is finalized.",
+        "The current process depends heavily on staff knowledge and manual checking, so mistakes can happen when the office is busy.",
+        "A centralized dashboard, automatic validation, searchable records, and clear error messages would make enrollment faster."
+      ],
+      [
+        "I log in, check available subjects, select my schedule, submit the enrollment request, and wait for validation. If something fails, I usually ask the registrar.",
+        "The system can be confusing when subjects conflict or a prerequisite is missing. The reason for rejection is not always obvious.",
+        "I want real-time subject availability and an easy way to see why a subject cannot be added.",
+        "Sometimes the system becomes slow during enrollment periods, and I am unsure whether my request was saved.",
+        "Mobile-friendly enrollment, notifications, clear validation messages, and a visible submission status would help."
+      ],
+      [
+        "I review class lists and submit grades through the current student information system. I often switch between student records and grading screens.",
+        "Searching for students and correcting submitted grades takes time, especially for large classes.",
+        "The system should make student lookup faster and provide validation before grades are submitted.",
+        "There should be an audit trail for grade changes and clear permissions for instructors and authorized staff.",
+        "Bulk grade entry, saved drafts, validation warnings, and a history of changes would improve the workflow."
+      ],
+      [
+        "I monitor system availability, user access, database health, and enrollment traffic. Most support requests come during registration peaks.",
+        "Performance drops and unclear error messages are the main operational concerns. Troubleshooting is harder when logs are incomplete.",
+        "We need monitoring, alerts, centralized logs, role-based access, and reliable backups.",
+        "The current environment has several manual maintenance tasks and depends on a few administrators.",
+        "Automated monitoring, backup verification, audit logs, and an administrator dashboard would reduce support effort."
+      ],
+      [
+        "Department staff maintain student information, coordinate requests, and verify records before forwarding them to the registrar or other offices.",
+        "Repeated data entry is a major source of delay. Staff also need better visibility into the status of requests.",
+        "A shared record with workflow status and ownership would help us track requests from submission to completion.",
+        "Access must be controlled because different offices should only see information relevant to their responsibilities.",
+        "Workflow tracking, role-based access, search, notifications, and reports would improve coordination."
+      ]
+    ];
+    const qDefaults = SEMI_STRUCTURED_QUESTIONS;
+    const created: StoredInterview[] = [];
+    for (let idx = existing.length; idx < people.length; idx++) {
+      const person = people[idx];
+      const formattedQuestions = qDefaults.map((q: StoredQuestion, qi: number) => ({
+        ...q,
+        id: \`demo-q-\${idx + 1}-\${qi + 1}\`,
+      }));
+      const interview: StoredInterview = {
+        id: \`int-demo-\${user.id.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-\${idx + 1}\`,
+        userId: user.id,
+        systemId: system.id,
+        systemName: system.name,
+        interviewerName: user.name,
+        interviewerRole: user.role,
+        interviewerDept: user.department,
+        intervieweeName: \`[DEMO] \${person[0]}\`,
+        intervieweeRole: person[1],
+        intervieweeDept: person[2],
+        intervieweeEmail: "",
+        shareToken: \`demo-token-\${user.id.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-\${idx + 1}\`,
+        status: "completed",
+        interviewType: "Semi-Structured",
+        questions: formattedQuestions,
+        prompt: DEMO_VERSION,
+        promptVersion: 1,
+        promptChangeCount: 1,
+        responses: {},
+        createdAt: new Date(Date.now() - (people.length - idx) * 3600000).toISOString(),
+        completedAt: new Date(Date.now() - (people.length - idx - 1) * 1800000).toISOString(),
+      };
+      answers[idx].forEach((answer, qi) => {
+        const q = formattedQuestions[qi];
+        const sentiments = ["constructive", "negative", "constructive", "neutral", "positive"];
+        const scores = [72, 35, 78, 55, 88];
+        interview.responses[q.id] = {
+          id: \`resp-demo-\${idx + 1}-\${qi + 1}\`,
+          interviewId: interview.id,
+          questionId: q.id,
+          questionText: q.questionText,
+          category: q.category,
+          responseText: answer,
+          audioDurationSeconds: 0,
+          aiTranscript: {
+            transcript: answer,
+            confidence: 0.97,
+            sentiment: sentiments[qi],
+            sentimentScore: scores[qi],
+            keyRequirements: [answer],
+            modelUsed: "Demo Dataset",
+            generatedAt: interview.completedAt,
+          },
+          createdAt: interview.completedAt,
+        };
+      });
+      if (supabase) await persistInterviewRemotely(interview);
+      else saveInterviewToDatabase(interview);
+      interviewsDb = interviewsDb.filter((x) => x.id !== interview.id);
+      interviewsDb.unshift(interview);
+      created.push(interview);
+    }
+    res.status(201).json({ success: true, created: created.length, existing: existing.length, system, interviews: [...created, ...existing] });
+  } catch (error: any) {
+    console.error("Demo dataset generation failed:", error);
+    res.status(500).json({ error: "Failed to generate demo dataset.", details: process.env.NODE_ENV === "production" ? undefined : error?.message });
+  }
+});
+
 app.post("/api/interviews/analytics/ai", async (req: Request, res: Response) => {
   const user = getAuthUser(req);
   if (!user) {
