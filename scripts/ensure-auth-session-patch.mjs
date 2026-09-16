@@ -161,5 +161,27 @@ if (profileStart >= 0 && profileEnd > profileStart) {
       return res;
     },\n`;
   apiSource = apiSource.slice(0, profileStart) + profileBlock + apiSource.slice(profileEnd);
-  fs.writeFileSync(apiPath, apiSource, 'utf8');
 }
+
+// Do not clear the browser token for a random protected endpoint's 401. Only
+// the explicit /auth/me session validation endpoint proves that authentication
+// itself is invalid. This prevents unrelated authorization errors from forcing
+// an immediate logout message after a successful login.
+const oldAuthExpiry = `    if (response.status === 401 && path !== '/api/auth/login' && path !== '/api/auth/register') {
+      setAuthToken(null);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('reqvoice-auth-expired'));
+      }
+      errMsg = 'Your login session has expired. Please sign in again.';
+    }`;
+const newAuthExpiry = `    if (response.status === 401 && path === '/api/auth/me') {
+      setAuthToken(null);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('reqvoice-auth-expired'));
+      }
+      errMsg = 'Your login session has expired. Please sign in again.';
+    }`;
+if (apiSource.includes(oldAuthExpiry)) {
+  apiSource = apiSource.replace(oldAuthExpiry, newAuthExpiry);
+}
+fs.writeFileSync(apiPath, apiSource, 'utf8');
