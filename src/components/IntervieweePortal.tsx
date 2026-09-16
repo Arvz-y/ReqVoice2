@@ -252,15 +252,21 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
       setRecordingSeconds(0);
       setSentimentResult(null);
 
-      // Support VP8/Opus container with target 600 kbps for ~75% space reduction
-      let mimeType = 'video/webm;codecs=vp8,opus';
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = 'video/webm';
-      }
+      // Prefer a broadly compatible MP4 recording when the browser supports it.
+      // Fall back to WebM only when MP4 MediaRecorder is unavailable. The server
+      // also converts WebM to H.264/AAC MP4 before delivery when FFmpeg is available.
+      const supportedMimeTypes = [
+        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+        'video/mp4',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+      ];
+      const mimeType = supportedMimeTypes.find((type) => MediaRecorder.isTypeSupported(type)) || 'video/webm';
 
       const recorder = new MediaRecorder(mediaStreamRef.current, {
         mimeType,
         videoBitsPerSecond: 600000,
+        audioBitsPerSecond: 96000,
       });
 
       recorder.ondataavailable = (event) => {
@@ -427,16 +433,18 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
       ...dest.stream.getAudioTracks(),
     ]);
 
+    const demoMimeType = ['video/mp4', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type)) || 'video/webm';
     const recorder = new MediaRecorder(combinedStream, {
-      mimeType: 'video/webm',
+      mimeType: demoMimeType,
       videoBitsPerSecond: 600000,
+      audioBitsPerSecond: 96000,
     });
     const chunks: Blob[] = [];
     recorder.ondataavailable = (e) => chunks.push(e.data);
     recorder.onstop = () => {
       osc.stop();
       audioCtx.close();
-      const demoBlob = new Blob(chunks, { type: 'video/webm' });
+      const demoBlob = new Blob(chunks, { type: demoMimeType });
       setRecordedBlob(demoBlob);
       const url = URL.createObjectURL(demoBlob);
       setRecordedVideoUrl(url);
