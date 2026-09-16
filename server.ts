@@ -8,7 +8,7 @@ import { createServer as createViteServer } from "vite";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // High limit for audio/video payloads
 app.use(express.json({ limit: "200mb" }));
@@ -613,7 +613,8 @@ app.get("/api/interviews/:id", (req: Request, res: Response) => {
 });
 
 app.post("/api/interviews", (req: Request, res: Response) => {
-  const currentUser = getAuthUser(req);
+  try {
+    const currentUser = getAuthUser(req);
   if (!currentUser) {
     res.status(401).json({ error: "Unauthorized" });
     return;
@@ -671,7 +672,14 @@ app.post("/api/interviews", (req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
   });
 
-  res.json({ interview: newInterview });
+  res.status(201).json({ interview: newInterview });
+  } catch (error: any) {
+    console.error("Create interview session failed:", error);
+    res.status(500).json({
+      error: "Failed to create interview session.",
+      details: process.env.NODE_ENV === "production" ? undefined : (error?.message || String(error)),
+    });
+  }
 });
 
 app.post("/api/interviews/:id/response", (req: Request, res: Response) => {
@@ -2160,9 +2168,14 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`ReqVoice AI Server running on http://0.0.0.0:${PORT}`);
   });
+
+  // Render's proxy can reuse HTTP connections. Keep Node's connection
+  // lifetime longer than Render's edge timeout to avoid intermittent 502s.
+  server.keepAliveTimeout = 120000;
+  server.headersTimeout = 120000;
 }
 
 startServer();
