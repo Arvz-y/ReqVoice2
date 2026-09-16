@@ -1340,6 +1340,10 @@ app.post(
         throw new Error("Video database verification failed after upload.");
       }
 
+      // The playback URL is the canonical media resource. It is intentionally
+      // independent of the browser's local blob URL, so the same resource can be
+      // previewed after upload and opened by the interviewer.
+      const videoUrl = "/api/videos/" + encodeURIComponent(videoId) + "/playback";
       res.status(201).json({
         success: true,
         complete: true,
@@ -1351,7 +1355,7 @@ app.post(
           deliveryMimeType: detected.extension === "mp4" ? "video/mp4" : detected.mimeType,
           storageStatus: "saved",
           storagePath: "video_database/interview_videos/" + videoId,
-          videoUrl: "/api/videos/" + videoId + "/playback",
+          videoUrl,
           recordedAt,
         },
       });
@@ -1359,11 +1363,19 @@ app.post(
       if (detected.extension !== "mp4") {
         void transcodeToCompatibleMp4(videoId, originalPath).then((compatibleMp4) => {
           if (!compatibleMp4 || !fs.existsSync(compatibleMp4) || fs.statSync(compatibleMp4).size <= 1024) return;
+          // Preserve the original recording in the database. The MP4 is only
+          // a delivery derivative; it must never replace/erase the source bytes.
+          const existing = getVideoDatabaseRecord(videoId);
+          if (!existing?.originalBuffer?.length) {
+            console.warn("Skipping MP4 derivative persistence because the original video bytes are missing.");
+            return;
+          }
+          const deliveryBuffer = fs.readFileSync(compatibleMp4);
           saveVideoToDatabase({
             id: videoId, interviewId: interview.id, questionId,
             sourceMimeType: detected.mimeType, sourceExtension: detected.extension,
-            originalBuffer: Buffer.alloc(0), deliveryMimeType: "video/mp4",
-            deliveryBuffer: null, storagePath: compatibleMp4, durationSeconds, recordedAt,
+            originalBuffer: existing.originalBuffer, deliveryMimeType: "video/mp4",
+            deliveryBuffer, storagePath: compatibleMp4, durationSeconds, recordedAt,
           });
         }).catch((error) => {
           console.warn("Background MP4 conversion failed; original recording remains available:", error);
