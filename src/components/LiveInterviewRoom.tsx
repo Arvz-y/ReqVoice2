@@ -77,6 +77,15 @@ export const LiveInterviewRoom: React.FC<LiveInterviewRoomProps> = ({
     };
   }, [interview.responses]);
 
+  // Keep the interviewer view synchronized while the interviewee submits responses remotely.
+  // This also makes newly persisted video recordings appear without requiring a page reload.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!document.hidden) onRefreshInterview();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [onRefreshInterview]);
+
   const handleRefresh = async () => {
     setIsRefreshing(true);
     await onRefreshInterview();
