@@ -670,6 +670,10 @@ function verifyPersistentAuthToken(token: string): string | null {
   if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
   try { return Buffer.from(payload, "base64url").toString("utf8"); } catch { return null; }
 }
+function sanitizeUser(user: StoredUser): Omit<StoredUser, "password"> {
+  const { password, ...safeUser } = user;
+  return safeUser;
+}
 async function persistUserRemotely(user: StoredUser): Promise<void> {
   if (!supabase) return;
   const { error } = await supabase.from("app_users").upsert({ id: user.id, name: user.name, username: user.username, email: user.email, password: user.password, role: user.role, department: user.department, avatar_url: user.avatarUrl, bio: user.bio, is_first_time: user.isFirstTime, has_completed_tutorial: user.hasCompletedTutorial, created_at: user.createdAt }, { onConflict: "id" });
