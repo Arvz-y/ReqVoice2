@@ -3261,9 +3261,9 @@ This unified report consolidates all systems requirements discovery sessions, st
 
   systemsDb.forEach((sys, idx) => {
     md += `### ${idx + 1}. ${sys.name}
-- **System ID:** `${sys.id}`
+- **System ID:** \`${sys.id}\`
 - **Domain/Type:** ${sys.type}
-- **Lifecycle State:** `${sys.lifecycleState.toUpperCase()}`
+- **Lifecycle State:** \`${sys.lifecycleState.toUpperCase()}\`
 - **Target Roles:** ${sys.targetRoles.join(", ")}
 - **Description:** ${sys.description}
 
@@ -3279,8 +3279,8 @@ This unified report consolidates all systems requirements discovery sessions, st
     md += `### Protocol #${idx + 1}: ${inv.intervieweeName} (${inv.intervieweeRole})
 - **System Evaluated:** ${inv.systemName}
 - **Interviewer:** ${inv.interviewerName} (${inv.interviewerRole} — ${inv.interviewerDept})
-- **Status:** `${inv.status.toUpperCase()}`
-- **Share Token:** `${inv.shareToken}`
+- **Status:** \`${inv.status.toUpperCase()}\`
+- **Share Token:** \`${inv.shareToken}\`
 - **Conducted On:** ${new Date(inv.createdAt).toLocaleDateString()}
 
 #### Interview Responses & AI Transcripts:
