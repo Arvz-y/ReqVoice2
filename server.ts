@@ -699,12 +699,13 @@ app.post("/api/interviews/:id/response", (req: Request, res: Response) => {
       res.status(400).json({ error: "The recorded video could not be accessed, so no transcript or response media was stored." });
       return;
     }
-    // Reports may update transcript metadata for a video that is already persisted.
+    // A previously persisted recording can be submitted again without its
+    // base64 payload. Do not try to decode an undefined value.
     if (!videoRecording.base64Data && videoRecording.storageStatus === "saved") {
       videoRecording.videoUrl = "/api/videos/" + videoRecording.id;
-    }
-    try {
-      const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64,/, "");
+    } else {
+      try {
+        const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64, "");
       const videoBuffer = Buffer.from(cleanBase64, "base64");
       if (!videoBuffer.length) throw new Error("Empty video payload");
       const mimeType = videoRecording.mimeType || "video/webm";
@@ -722,11 +723,12 @@ app.post("/api/interviews/:id/response", (req: Request, res: Response) => {
       videoRecording.videoUrl = "/api/videos/" + videoRecording.id;
       videoRecording.storageStatus = "saved";
       videoRecording.storagePath = "video_vault/" + videoRecording.id + "." + extension;
-      delete videoRecording.base64Data;
-    } catch (err) {
-      console.warn("Could not save video recording:", err);
-      res.status(500).json({ error: "The video recording could not be saved. No response was stored." });
-      return;
+        delete videoRecording.base64Data;
+      } catch (err) {
+        console.warn("Could not save video recording:", err);
+        res.status(500).json({ error: "The video recording could not be saved. No response was stored." });
+        return;
+      }
     }
   }
 
