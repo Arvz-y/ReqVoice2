@@ -286,10 +286,16 @@ let activitiesDb: StoredActivity[] = [];
 
 const videosStore = new Map<string, StoredVideo>();
 
-const userVideosDir = path.join(process.cwd(), "user-videos");
+// Render's default filesystem is ephemeral. Set VIDEO_STORAGE_DIR to a mounted
+// persistent disk (for example /var/data/reqvoice-videos) in production so
+// submitted recordings survive deploys/restarts.
+const userVideosDir = path.resolve(
+  process.env.VIDEO_STORAGE_DIR || path.join(process.cwd(), "user-videos")
+);
 if (!fs.existsSync(userVideosDir)) {
   fs.mkdirSync(userVideosDir, { recursive: true });
 }
+console.log(`Video storage directory: ${userVideosDir}`);
 
 // Browser MediaRecorder commonly produces WebM/VP8/Opus. That is excellent for
 // browser capture, but Windows Media Player and some mobile/default players may
