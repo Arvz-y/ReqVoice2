@@ -74,12 +74,13 @@ export const AnswerVideoPlayer: React.FC<AnswerVideoPlayerProps> = ({
       return;
     }
 
-    if (videoRecording) {
-      if (videoRecording.videoUrl) {
-        setResolvedUrl(videoRecording.videoUrl);
-      } else if (videoRecording.id) {
-        setResolvedUrl(`/api/videos/${videoRecording.id}`);
-      }
+    if (videoRecording?.id) {
+      // Always use the server's compatible playback endpoint. It prefers the
+      // H.264/AAC MP4 delivery copy and transparently falls back to the original
+      // capture only if conversion is unavailable.
+      setResolvedUrl(`/api/videos/${videoRecording.id}/playback`);
+    } else if (videoRecording?.videoUrl) {
+      setResolvedUrl(videoRecording.videoUrl);
     }
   }, [videoRecording, fallbackVideoUrl]);
 
@@ -146,7 +147,9 @@ export const AnswerVideoPlayer: React.FC<AnswerVideoPlayerProps> = ({
   const downloadUrl = videoRecording?.id
     ? `/api/videos/${videoRecording.id}/download`
     : resolvedUrl;
-  const downloadName = `reqvoice_recording_${videoRecording?.id || 'answer'}${videoRecording?.mimeType?.includes('mp4') ? '.mp4' : '.mp4'}`;
+  const deliveryMimeType = videoRecording?.deliveryMimeType || videoRecording?.mimeType || 'video/mp4';
+  const downloadExtension = deliveryMimeType.includes('webm') ? 'webm' : deliveryMimeType.includes('ogg') ? 'ogg' : 'mp4';
+  const downloadName = `reqvoice_recording_${videoRecording?.id || 'answer'}.${downloadExtension}`;
 
   return (
     <div className={`space-y-2 ${className}`}>
@@ -217,10 +220,7 @@ export const AnswerVideoPlayer: React.FC<AnswerVideoPlayerProps> = ({
                 }
               }}
               className="w-full h-full object-cover bg-black"
-            >
-              <source src={resolvedUrl} type="video/webm" />
-              <source src={resolvedUrl} type="video/mp4" />
-            </video>
+            />
           </>
         )}
       </div>
@@ -232,7 +232,7 @@ export const AnswerVideoPlayer: React.FC<AnswerVideoPlayerProps> = ({
           <span className="flex items-center space-x-1">
             <span className={`w-2 h-2 rounded-full ${resolvedUrl ? 'bg-emerald-400' : 'bg-slate-600'}`} />
             <span className="font-medium text-[11px]">
-              {usingAudioFallback ? 'Audio Mode' : 'H.264/AAC MP4'}
+              {usingAudioFallback ? 'Audio Mode' : (deliveryMimeType.includes('mp4') ? 'H.264/AAC MP4' : deliveryMimeType.includes('webm') ? 'WebM' : 'Video')}
             </span>
           </span>
 
