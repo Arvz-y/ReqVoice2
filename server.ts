@@ -281,8 +281,7 @@ const DEFAULT_QUESTIONS: StoredQuestion[] = SEMI_STRUCTURED_QUESTIONS;
 
 let systemsDb: StoredSystem[] = [];
 
-let interviewsDb: StoredInterview[] = loadInterviewsFromDatabase();
-console.log(`Loaded ${interviewsDb.length} persisted interview session(s).`);
+let interviewsDb: StoredInterview[] = [];
 
 let activitiesDb: StoredActivity[] = [];
 
@@ -355,6 +354,9 @@ const loadInterviewsFromDatabase = (): StoredInterview[] => {
   }
   return loaded;
 };
+
+interviewsDb = loadInterviewsFromDatabase();
+console.log(`Loaded ${interviewsDb.length} persisted interview session(s).`);
 
 const saveVideoToDatabase = (record: {
   id: string;
