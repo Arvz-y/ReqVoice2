@@ -1477,7 +1477,10 @@ app.post("/api/demo/generate", async (req: Request, res: Response) => {
   const DEMO_VERSION = "REQVOICE_DEMO_DATASET_V1";
   const DEMO_SYSTEM_NAME = "[DEMO] University Student Information System";
   try {
-    const existingSystems = supabase ? await loadRemoteSystemsForUser(user.id) : systemsDb.filter((x) => x.userId === user.id);
+    // Systems are already loaded into systemsDb at server startup. Do not call
+    // a separate remote loader here: the previous helper did not exist in this
+    // server build and caused /api/demo/generate to return HTTP 500.
+    const existingSystems = systemsDb.filter((x) => x.userId === user.id);
     let system = existingSystems.find((x: any) => x.name === DEMO_SYSTEM_NAME) as StoredSystem | undefined;
     if (!system) {
       system = {
@@ -1491,6 +1494,7 @@ app.post("/api/demo/generate", async (req: Request, res: Response) => {
         createdAt: new Date().toISOString(),
       };
       if (supabase) await persistSystemRemotely(system);
+      systemsDb = systemsDb.filter((x) => x.id !== system!.id);
       systemsDb.unshift(system);
     }
 
