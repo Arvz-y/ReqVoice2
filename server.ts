@@ -980,8 +980,17 @@ app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
     category: question ? question.category : "workflow",
     responseText: responseText || "",
     audioDurationSeconds: audioDurationSeconds || 0,
-    videoRecording,
-    aiTranscript: (videoRecording?.storageStatus === "saved" && aiTranscript?.transcript?.trim()) ? aiTranscript : undefined,
+    videoRecording: videoRecording
+      ? {
+          ...videoRecording,
+          transcriptionStatus: aiTranscript?.transcript?.trim() ? "completed" : "unavailable",
+        }
+      : undefined,
+    // Transcript is optional. It is retained only when text was actually
+    // returned from processing this submitted recording.
+    aiTranscript: (videoRecording?.storageStatus === "saved" && aiTranscript?.transcript?.trim())
+      ? aiTranscript
+      : undefined,
     createdAt: new Date().toISOString(),
   };
 
