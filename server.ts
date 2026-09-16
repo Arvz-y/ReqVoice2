@@ -1223,6 +1223,7 @@ Format as JSON array of objects:
 
       if (!response?.text) {
         throw lastModelError || new Error("No Gemini model returned questions.");
+      }
 
       const questions = JSON.parse(response.text || "[]");
       if (Array.isArray(questions) && questions.length > 0) {
