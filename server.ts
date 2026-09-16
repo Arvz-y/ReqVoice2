@@ -1351,7 +1351,7 @@ app.post("/api/demo/generate", async (req: Request, res: Response) => {
     let system = existingSystems.find((x: any) => x.name === DEMO_SYSTEM_NAME) as StoredSystem | undefined;
     if (!system) {
       system = {
-        id: \`sys-demo-\${user.id.replace(/[^a-zA-Z0-9]/g, "").slice(-12)}\`,
+        id: `sys-demo-${user.id.replace(/[^a-zA-Z0-9]/g, "").slice(-12)}`,
         userId: user.id,
         name: DEMO_SYSTEM_NAME,
         type: "Student Information System",
@@ -1421,21 +1421,21 @@ app.post("/api/demo/generate", async (req: Request, res: Response) => {
       const person = people[idx];
       const formattedQuestions = qDefaults.map((q: StoredQuestion, qi: number) => ({
         ...q,
-        id: \`demo-q-\${idx + 1}-\${qi + 1}\`,
+        id: `demo-q-${idx + 1}-${qi + 1}`,
       }));
       const interview: StoredInterview = {
-        id: \`int-demo-\${user.id.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-\${idx + 1}\`,
+        id: `int-demo-${user.id.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${idx + 1}`,
         userId: user.id,
         systemId: system.id,
         systemName: system.name,
         interviewerName: user.name,
         interviewerRole: user.role,
         interviewerDept: user.department,
-        intervieweeName: \`[DEMO] \${person[0]}\`,
+        intervieweeName: `[DEMO] ${person[0]}`,
         intervieweeRole: person[1],
         intervieweeDept: person[2],
         intervieweeEmail: "",
-        shareToken: \`demo-token-\${user.id.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-\${idx + 1}\`,
+        shareToken: `demo-token-${user.id.replace(/[^a-zA-Z0-9]/g, "").slice(-8)}-${idx + 1}`,
         status: "completed",
         interviewType: "Semi-Structured",
         questions: formattedQuestions,
@@ -1451,7 +1451,7 @@ app.post("/api/demo/generate", async (req: Request, res: Response) => {
         const sentiments = ["constructive", "negative", "constructive", "neutral", "positive"];
         const scores = [72, 35, 78, 55, 88];
         interview.responses[q.id] = {
-          id: \`resp-demo-\${idx + 1}-\${qi + 1}\`,
+          id: `resp-demo-${idx + 1}-${qi + 1}`,
           interviewId: interview.id,
           questionId: q.id,
           questionText: q.questionText,
@@ -3155,33 +3155,33 @@ SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 START TRANSACTION;
 SET time_zone = "+00:00";
 
-CREATE DATABASE IF NOT EXISTS \`reqvoice_db\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE \`reqvoice_db\`;
+CREATE DATABASE IF NOT EXISTS `reqvoice_db` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE `reqvoice_db`;
 
 -- --------------------------------------------------------
--- Table: \`users\`
+-- Table: `users`
 -- --------------------------------------------------------
-DROP TABLE IF EXISTS \`users\`;
-CREATE TABLE \`users\` (
-  \`id\` varchar(64) NOT NULL,
-  \`name\` varchar(128) NOT NULL,
-  \`username\` varchar(64) NOT NULL UNIQUE,
-  \`email\` varchar(191) NOT NULL UNIQUE,
-  \`password_hash\` varchar(255) NOT NULL,
-  \`role\` varchar(128) NOT NULL,
-  \`department\` varchar(128) NOT NULL,
-  \`avatar_url\` text,
-  \`bio\` text,
-  \`is_first_time\` tinyint(1) DEFAULT 1,
-  \`has_completed_tutorial\` tinyint(1) DEFAULT 0,
-  \`created_at\` datetime DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (\`id\`)
+DROP TABLE IF EXISTS `users`;
+CREATE TABLE `users` (
+  `id` varchar(64) NOT NULL,
+  `name` varchar(128) NOT NULL,
+  `username` varchar(64) NOT NULL UNIQUE,
+  `email` varchar(191) NOT NULL UNIQUE,
+  `password_hash` varchar(255) NOT NULL,
+  `role` varchar(128) NOT NULL,
+  `department` varchar(128) NOT NULL,
+  `avatar_url` text,
+  `bio` text,
+  `is_first_time` tinyint(1) DEFAULT 1,
+  `has_completed_tutorial` tinyint(1) DEFAULT 0,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 `;
 
   usersDb.forEach((u) => {
-    sql += `INSERT INTO \`users\` (\`id\`, \`name\`, \`username\`, \`email\`, \`password_hash\`, \`role\`, \`department\`, \`avatar_url\`, \`bio\`, \`is_first_time\`, \`has_completed_tutorial\`, \`created_at\`) VALUES (
+    sql += `INSERT INTO `users` (`id`, `name`, `username`, `email`, `password_hash`, `role`, `department`, `avatar_url`, `bio`, `is_first_time`, `has_completed_tutorial`, `created_at`) VALUES (
   ${escapeSql(u.id)},
   ${escapeSql(u.name)},
   ${escapeSql(u.username)},
@@ -3198,24 +3198,24 @@ CREATE TABLE \`users\` (
   });
 
   sql += `\n-- --------------------------------------------------------
--- Table: \`systems_under_study\`
+-- Table: `systems_under_study`
 -- --------------------------------------------------------
-DROP TABLE IF EXISTS \`systems_under_study\`;
-CREATE TABLE \`systems_under_study\` (
-  \`id\` varchar(64) NOT NULL,
-  \`name\` varchar(255) NOT NULL,
-  \`system_type\` varchar(128) NOT NULL,
-  \`description\` text,
-  \`lifecycle_state\` enum('existing','proposed','modernization') NOT NULL,
-  \`target_roles\` json DEFAULT NULL,
-  \`created_at\` datetime DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (\`id\`)
+DROP TABLE IF EXISTS `systems_under_study`;
+CREATE TABLE `systems_under_study` (
+  `id` varchar(64) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `system_type` varchar(128) NOT NULL,
+  `description` text,
+  `lifecycle_state` enum('existing','proposed','modernization') NOT NULL,
+  `target_roles` json DEFAULT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 `;
 
   systemsDb.forEach((s) => {
-    sql += `INSERT INTO \`systems_under_study\` (\`id\`, \`name\`, \`system_type\`, \`description\`, \`lifecycle_state\`, \`target_roles\`, \`created_at\`) VALUES (
+    sql += `INSERT INTO `systems_under_study` (`id`, `name`, `system_type`, `description`, `lifecycle_state`, `target_roles`, `created_at`) VALUES (
   ${escapeSql(s.id)},
   ${escapeSql(s.name)},
   ${escapeSql(s.type)},
@@ -3227,32 +3227,32 @@ CREATE TABLE \`systems_under_study\` (
   });
 
   sql += `\n-- --------------------------------------------------------
--- Table: \`interviews\`
+-- Table: `interviews`
 -- --------------------------------------------------------
-DROP TABLE IF EXISTS \`interviews\`;
-CREATE TABLE \`interviews\` (
-  \`id\` varchar(64) NOT NULL,
-  \`system_id\` varchar(64) NOT NULL,
-  \`system_name\` varchar(255) NOT NULL,
-  \`interviewer_name\` varchar(128) NOT NULL,
-  \`interviewer_role\` varchar(128) DEFAULT NULL,
-  \`interviewer_dept\` varchar(128) DEFAULT NULL,
-  \`interviewee_name\` varchar(128) NOT NULL,
-  \`interviewee_role\` varchar(128) NOT NULL,
-  \`interviewee_email\` varchar(191) DEFAULT NULL,
-  \`interviewee_dept\` varchar(128) DEFAULT NULL,
-  \`share_token\` varchar(128) NOT NULL UNIQUE,
-  \`status\` enum('scheduled','in_progress','completed') DEFAULT 'in_progress',
-  \`summary_report\` json DEFAULT NULL,
-  \`created_at\` datetime DEFAULT CURRENT_TIMESTAMP,
-  \`completed_at\` datetime DEFAULT NULL,
-  PRIMARY KEY (\`id\`)
+DROP TABLE IF EXISTS `interviews`;
+CREATE TABLE `interviews` (
+  `id` varchar(64) NOT NULL,
+  `system_id` varchar(64) NOT NULL,
+  `system_name` varchar(255) NOT NULL,
+  `interviewer_name` varchar(128) NOT NULL,
+  `interviewer_role` varchar(128) DEFAULT NULL,
+  `interviewer_dept` varchar(128) DEFAULT NULL,
+  `interviewee_name` varchar(128) NOT NULL,
+  `interviewee_role` varchar(128) NOT NULL,
+  `interviewee_email` varchar(191) DEFAULT NULL,
+  `interviewee_dept` varchar(128) DEFAULT NULL,
+  `share_token` varchar(128) NOT NULL UNIQUE,
+  `status` enum('scheduled','in_progress','completed') DEFAULT 'in_progress',
+  `summary_report` json DEFAULT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  `completed_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 `;
 
   interviewsDb.forEach((i) => {
-    sql += `INSERT INTO \`interviews\` (\`id\`, \`system_id\`, \`system_name\`, \`interviewer_name\`, \`interviewer_role\`, \`interviewer_dept\`, \`interviewee_name\`, \`interviewee_role\`, \`interviewee_email\`, \`interviewee_dept\`, \`share_token\`, \`status\`, \`summary_report\`, \`created_at\`, \`completed_at\`) VALUES (
+    sql += `INSERT INTO `interviews` (`id`, `system_id`, `system_name`, `interviewer_name`, `interviewer_role`, `interviewer_dept`, `interviewee_name`, `interviewee_role`, `interviewee_email`, `interviewee_dept`, `share_token`, `status`, `summary_report`, `created_at`, `completed_at`) VALUES (
   ${escapeSql(i.id)},
   ${escapeSql(i.systemId)},
   ${escapeSql(i.systemName)},
@@ -3272,32 +3272,32 @@ CREATE TABLE \`interviews\` (
   });
 
   sql += `\n-- --------------------------------------------------------
--- Table: \`interview_responses\`
+-- Table: `interview_responses`
 -- --------------------------------------------------------
-DROP TABLE IF EXISTS \`interview_responses\`;
-CREATE TABLE \`interview_responses\` (
-  \`id\` varchar(64) NOT NULL,
-  \`interview_id\` varchar(64) NOT NULL,
-  \`question_id\` varchar(64) NOT NULL,
-  \`question_text\` text NOT NULL,
-  \`category\` varchar(64) NOT NULL,
-  \`response_text\` longtext,
-  \`audio_duration_seconds\` int DEFAULT 0,
-  \`ai_transcript\` longtext,
-  \`ai_confidence\` int DEFAULT 95,
-  \`sentiment\` enum('positive','constructive','neutral','negative') DEFAULT 'constructive',
-  \`sentiment_score\` int DEFAULT 75,
-  \`key_requirements\` json DEFAULT NULL,
-  \`ai_model\` varchar(64) DEFAULT NULL,
-  \`created_at\` datetime DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (\`id\`)
+DROP TABLE IF EXISTS `interview_responses`;
+CREATE TABLE `interview_responses` (
+  `id` varchar(64) NOT NULL,
+  `interview_id` varchar(64) NOT NULL,
+  `question_id` varchar(64) NOT NULL,
+  `question_text` text NOT NULL,
+  `category` varchar(64) NOT NULL,
+  `response_text` longtext,
+  `audio_duration_seconds` int DEFAULT 0,
+  `ai_transcript` longtext,
+  `ai_confidence` int DEFAULT 95,
+  `sentiment` enum('positive','constructive','neutral','negative') DEFAULT 'constructive',
+  `sentiment_score` int DEFAULT 75,
+  `key_requirements` json DEFAULT NULL,
+  `ai_model` varchar(64) DEFAULT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 `;
 
   interviewsDb.forEach((i) => {
     Object.values(i.responses).forEach((r: any) => {
-      sql += `INSERT INTO \`interview_responses\` (\`id\`, \`interview_id\`, \`question_id\`, \`question_text\`, \`category\`, \`response_text\`, \`audio_duration_seconds\`, \`ai_transcript\`, \`ai_confidence\`, \`sentiment\`, \`sentiment_score\`, \`key_requirements\`, \`ai_model\`, \`created_at\`) VALUES (
+      sql += `INSERT INTO `interview_responses` (`id`, `interview_id`, `question_id`, `question_text`, `category`, `response_text`, `audio_duration_seconds`, `ai_transcript`, `ai_confidence`, `sentiment`, `sentiment_score`, `key_requirements`, `ai_model`, `created_at`) VALUES (
   ${escapeSql(r.id)},
   ${escapeSql(r.interviewId)},
   ${escapeSql(r.questionId)},
@@ -3350,9 +3350,9 @@ This unified report consolidates all systems requirements discovery sessions, st
 
   systemsDb.forEach((sys, idx) => {
     md += `### ${idx + 1}. ${sys.name}
-- **System ID:** \`${sys.id}\`
+- **System ID:** `${sys.id}`
 - **Domain/Type:** ${sys.type}
-- **Lifecycle State:** \`${sys.lifecycleState.toUpperCase()}\`
+- **Lifecycle State:** `${sys.lifecycleState.toUpperCase()}`
 - **Target Roles:** ${sys.targetRoles.join(", ")}
 - **Description:** ${sys.description}
 
@@ -3368,8 +3368,8 @@ This unified report consolidates all systems requirements discovery sessions, st
     md += `### Protocol #${idx + 1}: ${inv.intervieweeName} (${inv.intervieweeRole})
 - **System Evaluated:** ${inv.systemName}
 - **Interviewer:** ${inv.interviewerName} (${inv.interviewerRole} — ${inv.interviewerDept})
-- **Status:** \`${inv.status.toUpperCase()}\`
-- **Share Token:** \`${inv.shareToken}\`
+- **Status:** `${inv.status.toUpperCase()}`
+- **Share Token:** `${inv.shareToken}`
 - **Conducted On:** ${new Date(inv.createdAt).toLocaleDateString()}
 
 #### Interview Responses & AI Transcripts:
