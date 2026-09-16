@@ -49,10 +49,19 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     let errorPayload: any = null;
     try {
       const raw = await response.text();
-      try {
-        errorPayload = raw ? JSON.parse(raw) : null;
-      } catch {
-        errorPayload = raw ? { error: raw } : null;
+      const contentType = response.headers.get("content-type") || "";
+      const looksLikeHtml = /text\\/html/i.test(contentType) || /^\\s*<!doctype html|^\\s*<html[\\s>]/i.test(raw);
+      if (looksLikeHtml) {
+        errorPayload = {
+          error: `The server returned an HTML page instead of a JSON API response (HTTP ${response.status}). The API endpoint may be unavailable or the server may have restarted.`,
+          htmlResponse: true,
+        };
+      } else {
+        try {
+          errorPayload = raw ? JSON.parse(raw) : null;
+        } catch {
+          errorPayload = raw ? { error: raw } : null;
+        }
       }
       if (errorPayload?.error) errMsg = errorPayload.error;
     } catch {}
