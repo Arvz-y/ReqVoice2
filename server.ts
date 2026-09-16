@@ -899,6 +899,9 @@ app.post("/api/interviews/:id/response", async (req: Request, res: Response) => 
         videoRecording.mimeType = deliveryExtension === "mp4" ? "video/mp4" : mimeType;
         videoRecording.sourceMimeType = mimeType;
         videoRecording.deliveryMimeType = videoRecording.mimeType;
+        // Never keep the large base64 payload in the interview record or send it
+        // back to the interviewer; the server-side video file is the media source.
+        delete videoRecording.base64Data;
 
       } catch (err) {
         console.warn("Could not save video recording:", err);
