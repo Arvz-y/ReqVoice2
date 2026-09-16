@@ -261,13 +261,15 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
         systemType: currentSystem?.type || 'Business Application',
         role: intervieweeRole || 'Stakeholder',
         prompt: INTERVIEW_TYPE_DETAILS[type].defaultPrompt,
+        promptVersion: promptVersion + 1,
         count: questionCount,
         interviewType: type,
       });
 
       if (res.questions && res.questions.length > 0) {
         setQuestions(res.questions);
-        setLastGeneratedPrompt(aiPrompt);
+        setLastGeneratedPrompt(INTERVIEW_TYPE_DETAILS[type].defaultPrompt);
+        setGeneratedRevision(promptVersion + 1);
       }
     } catch (err: any) {
       setValidationError(`AI generation failed: ${err.message || 'Please check your connection'}`);
@@ -298,6 +300,8 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
 
       if (res.questions && res.questions.length > 0) {
         setQuestions(res.questions);
+        setLastGeneratedPrompt(aiPrompt);
+        setGeneratedRevision(promptVersion);
       }
     } catch (err: any) {
       setValidationError(`AI generation failed: ${err.message || 'Please check your connection'}`);
