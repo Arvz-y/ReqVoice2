@@ -1740,6 +1740,36 @@ app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
 // recorded answer remains playable even when AI analysis fails.
 const ensureCompatibleVideoDelivery = async (videoId: string) => {
   let record = getVideoDatabaseRecord(videoId);
+
+  // Render's filesystem/SQLite cache is ephemeral. If this instance does not
+  // have the recording, restore it from Supabase Storage before attempting
+  // playback. The interviewer must never depend on the instance that received
+  // the original upload.
+  if (!record && supabase) {
+    try {
+      const remoteVideo = await getRemoteVideoBuffer(videoId);
+      if (remoteVideo) {
+        const detected = detectVideoContainer(remoteVideo.buffer.subarray(0, 16));
+        const sourceMimeType = remoteVideo.mimeType || detected?.mimeType || "video/webm";
+        const sourceExtension = detected?.extension || (sourceMimeType.includes("mp4") ? "mp4" : sourceMimeType.includes("ogg") ? "ogg" : "webm");
+        saveVideoToDatabase({
+          id: videoId,
+          sourceMimeType,
+          sourceExtension,
+          originalBuffer: remoteVideo.buffer,
+          deliveryMimeType: sourceMimeType,
+          deliveryBuffer: null,
+          storagePath: null,
+          durationSeconds: 0,
+          recordedAt: new Date().toISOString(),
+        });
+        record = getVideoDatabaseRecord(videoId);
+      }
+    } catch (error) {
+      console.error("Could not restore remote video for playback:", error);
+    }
+  }
+
   if (!record) return null;
 
   // MP4 recordings are already in the preferred delivery format.
@@ -2049,7 +2079,7 @@ Analyze the spoken response and return a JSON object with:
       };
 
       const response = await ai.models.generateContent({
-        model: process.env.GEMINI_QUESTION_MODEL || "gemini-3.6-flash",
+        model: process.env.GEMINI_TRANSCRIPTION_MODEL || process.env.GEMINI_QUESTION_MODEL || "gemini-3.5-flash-lite",
         contents,
         config: {
           responseMimeType: "application/json",
@@ -2069,8 +2099,36 @@ Analyze the spoken response and return a JSON object with:
         });
         return;
       }
-    } catch (err) {
-      console.warn("Gemini transcription encountered error:", err);
+    } catch (err: any) {
+      console.warn("Gemini transcription encountered error:", err?.message || err);
+      // A configured question-generation model may not support the same media
+      // input path. Retry once with the known server-side Flash Lite model before
+      // declaring transcription unavailable.
+      if ((process.env.GEMINI_TRANSCRIPTION_MODEL || process.env.GEMINI_QUESTION_MODEL) &&
+          (process.env.GEMINI_TRANSCRIPTION_MODEL || process.env.GEMINI_QUESTION_MODEL) !== "gemini-3.5-flash-lite") {
+        try {
+          const retry = await ai.models.generateContent({
+            model: "gemini-3.5-flash-lite",
+            contents,
+            config: { responseMimeType: "application/json" },
+          });
+          const parsedRetry = JSON.parse(retry.text || "{}");
+          if (parsedRetry.transcript) {
+            res.json({
+              transcript: parsedRetry.transcript,
+              confidence: parsedRetry.confidence || 96,
+              sentiment: parsedRetry.sentiment || "constructive",
+              sentimentScore: parsedRetry.sentimentScore || 85,
+              keyRequirements: parsedRetry.keyRequirements || [],
+              modelUsed: "gemini-3.5-flash-lite",
+              generatedAt: new Date().toISOString(),
+            });
+            return;
+          }
+        } catch (retryError: any) {
+          console.warn("Gemini transcription fallback also failed:", retryError?.message || retryError);
+        }
+      }
     }
   }
 
