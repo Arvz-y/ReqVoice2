@@ -775,7 +775,6 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
     }
 
     const token = createPersistentAuthToken(user.id);
-    activeSessions.set(token, user);
     res.json({ success: true, token, user: sanitizeUser(user) });
   } catch (error: any) {
     console.error("[AUTH LOGIN] Unexpected error:", error);
@@ -866,7 +865,6 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
       });
 
       const token = createPersistentAuthToken(newUser.id);
-      activeSessions.set(token, newUser);
       res.status(201).json({ success: true, token, user: sanitizeUser(newUser) });
     } catch (storageError: any) {
       // Do not leave an orphaned Supabase Auth account when profile/workspace creation fails.
@@ -887,7 +885,7 @@ app.post("/api/auth/logout", (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   if (authHeader) {
     const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-    activeSessions.delete(token);
+    // Authentication tokens are stateless and signed; logout is handled client-side by clearing the token.
   }
   res.json({ success: true });
 });
