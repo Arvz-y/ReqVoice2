@@ -716,40 +716,71 @@ app.get("/api/auth/me", (req: Request, res: Response) => {
 });
 
 app.post("/api/auth/login", async (req: Request, res: Response) => {
-  const { usernameOrEmail, password } = req.body;
-  if (!usernameOrEmail) {
-    res.status(400).json({ error: "Username or email is required." });
-    return;
-  }
+  try {
+    const { usernameOrEmail, password } = req.body;
+    if (!usernameOrEmail || !password) {
+      res.status(400).json({ error: "Username/email and password are required." });
+      return;
+    }
 
-  const query = usernameOrEmail.trim().toLowerCase();
-  const user = usersDb.find(
-    (u) => u.username.toLowerCase() === query || u.email.toLowerCase() === query
-  );
+    const query = String(usernameOrEmail).trim().toLowerCase();
+    let user = usersDb.find(
+      (u) => u.username.toLowerCase() === query || u.email.toLowerCase() === query
+    );
 
-  if (!user) {
-    res.status(401).json({ error: "No account found matching this username or email." });
-    return;
-  }
+    // On a fresh Render instance, recover the profile from Supabase instead of
+    // depending on the in-memory usersDb cache.
+    if (!user && supabase) {
+      const { data, error } = await supabase.from("app_users").select("*")
+        .or(`username.eq.${query},email.eq.${query}`).maybeSingle();
+      if (error) throw new Error("Supabase user lookup failed: " + error.message);
+      if (data) {
+        user = {
+          id: data.id, name: data.name, username: data.username, email: data.email,
+          password: data.password, role: data.role, department: data.department,
+          avatarUrl: data.avatar_url || "", bio: data.bio || "",
+          isFirstTime: !!data.is_first_time, hasCompletedTutorial: !!data.has_completed_tutorial,
+          createdAt: data.created_at,
+        };
+        usersDb.push(user);
+      }
+    }
 
-  if (supabaseAuth) {
-    const { data: authData, error: authError } = await supabaseAuth.auth.signInWithPassword({
-      email: user.email,
-      password: String(password || ""),
-    });
-    if (authError || !authData.user) {
+    if (!user) {
+      res.status(401).json({ error: "No account found matching this username or email." });
+      return;
+    }
+
+    if (!supabaseAuth) {
+      res.status(503).json({ error: "Secure authentication is not configured. Check SUPABASE_PUBLISHABLE_KEY on Render." });
+      return;
+    }
+
+    let authData;
+    let authError;
+    try {
+      ({ data: authData, error: authError } = await supabaseAuth.auth.signInWithPassword({
+        email: user.email,
+        password: String(password),
+      }));
+    } catch (error: any) {
+      console.error("[AUTH LOGIN] Supabase authentication request failed:", error);
+      res.status(502).json({ error: "Authentication service could not be reached.", detail: error?.message || "Unknown authentication error" });
+      return;
+    }
+
+    if (authError || !authData?.user) {
       res.status(401).json({ error: "Invalid password. Please verify and try again." });
       return;
     }
-  } else if (user.password && password !== user.password) {
-    // Temporary compatibility fallback for an environment where Supabase Auth is not configured.
-    res.status(503).json({ error: "Secure authentication is not configured. Please contact the administrator." });
-    return;
-  }
 
-  const token = createPersistentAuthToken(user.id);
-  activeSessions.set(token, user);
-  res.json({ success: true, token, user: sanitizeUser(user) });
+    const token = createPersistentAuthToken(user.id);
+    activeSessions.set(token, user);
+    res.json({ success: true, token, user: sanitizeUser(user) });
+  } catch (error: any) {
+    console.error("[AUTH LOGIN] Unexpected error:", error);
+    res.status(500).json({ error: "Login failed unexpectedly.", detail: error?.message || "Unknown error" });
+  }
 });
 
 app.post("/api/auth/register", async (req: Request, res: Response) => {
