@@ -140,6 +140,8 @@ export const api = {
       intervieweeDept?: string;
       interviewType?: InterviewType;
       questions: Partial<InterviewQuestion>[];
+      prompt?: string;
+      promptVersion?: number;
     }) =>
       request<{ interview: InterviewSession }>('/api/interviews', {
         method: 'POST',
