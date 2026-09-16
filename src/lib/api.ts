@@ -251,6 +251,7 @@ export const api = {
       role?: string;
       prompt?: string;
       count?: number;
+      promptVersion?: number;
       interviewType?: 'Structured' | 'Semi-Structured' | 'Unstructured';
     }) =>
       request<{ questions: InterviewQuestion[] }>('/api/gemini/suggest-questions', {
