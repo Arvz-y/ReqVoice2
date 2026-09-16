@@ -1216,11 +1216,19 @@ app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
   // evidence even when Gemini cannot transcribe it.
   if (videoRecording && videoRecording.id) {
     if (!videoRecording.base64Data && videoRecording.storageStatus !== "saved") {
-      res.status(400).json({ error: "The recorded video payload is missing. The response cannot be stored until the actual recording is received." });
+      res.status(400).json({ error: "The recorded video has not been uploaded yet. Please upload the recording before submitting the answer." });
       return;
     }
     if (!videoRecording.base64Data && videoRecording.storageStatus === "saved") {
-      videoRecording.videoUrl = "/api/videos/" + videoRecording.id;
+      const savedVideo = getVideoDatabaseRecord(videoRecording.id);
+      if (!savedVideo || savedVideo.interviewId !== interview.id || savedVideo.questionId !== questionId) {
+        res.status(409).json({ code: "VIDEO_REFERENCE_INVALID", error: "The saved recording could not be matched to this interview question." });
+        return;
+      }
+      videoRecording.videoUrl = "/api/videos/" + videoRecording.id + "/playback";
+      videoRecording.mimeType = savedVideo.deliveryMimeType;
+      videoRecording.sourceMimeType = savedVideo.sourceMimeType;
+      videoRecording.deliveryMimeType = savedVideo.deliveryMimeType;
     } else {
     try {
       const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64,/, "");
