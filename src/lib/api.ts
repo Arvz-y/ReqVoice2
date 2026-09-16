@@ -341,7 +341,7 @@ export const api = {
     list: () => request<{ activities: UserActivity[] }>('/api/activities'),
   },
   videos: {
-    getUrl: (id: string) => `/api/videos/${id}`,
+    getUrl: (id: string) => `/api/videos/${id}/playback`,
     getDownloadUrl: (id: string) => `/api/videos/${id}/download`,
   },
   aiChat: {
