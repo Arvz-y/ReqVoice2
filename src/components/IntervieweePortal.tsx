@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { api } from '../lib/api';
-import { saveVideoBlob, deleteVideoBlob, calculateCompressionStats, blobToBase64 } from '../lib/videoStorage';
+import { saveVideoBlob, deleteVideoBlob, calculateCompressionStats } from '../lib/videoStorage';
 import { InterviewQuestion } from '../types';
 import { useTheme } from './ThemeContext';
 
@@ -567,13 +567,15 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
   };
 
   // Submit Answer (Typing or Recorded Video)
+  // Recorded media is uploaded as a binary Blob first. The response metadata then
+  // references the server-side video database record, so transcription can fail
+  // without preventing the video from being submitted or played back.
   const handleSubmitAnswer = async () => {
     const currentQ = sessionData.questions[currentQIndex];
     if (!currentQ) return;
 
     const hasTyped = typedResponse.trim().length > 0;
     const hasRecorded = !!recordedBlob;
-
     if (!hasTyped && !hasRecorded) {
       alert('Please either type an answer or record a video/audio response before submitting.');
       return;
@@ -581,30 +583,45 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
 
     setIsSubmitting(true);
     try {
-      let base64Media = '';
+      let finalTranscript = '';
+      let finalSentiment = null as any;
+      let uploadedVideo: any = null;
+
       if (recordedBlob) {
-        if (recordedBlob.size < 1024) {
-          throw new Error('The recorded video is incomplete or empty. Please record the answer again.');
-        }
-        base64Media = await blobToBase64(recordedBlob);
-        if (!base64Media || base64Media.length < 1000) {
-          throw new Error('The recorded video could not be encoded correctly. Please record the answer again.');
-        }
-      }
+        if (recordedBlob.size < 1024) throw new Error('The recorded video is incomplete or empty. Please record the answer again.');
 
-      // Evidence rule: AI transcript data is created only from an actual recording.
-      // A typed answer remains the interviewee's written response and is never relabeled as a transcript.
-      let finalTranscript = recordedBlob ? liveTranscript.trim() : '';
-      let finalSentiment = recordedBlob ? sentimentResult : null;
-
-      // A recording is valid evidence even when transcription fails.
-      // Never invent a transcript. The original video must still be submitted
-      // and made available to the interviewer for playback.
-      // 2. Save compressed video blob locally in IndexedDB if not already saved
-      const videoId = currentSavedVideoIdRef.current || `vid-${currentQ.id}-${Date.now()}`;
-      if (recordedBlob && !currentSavedVideoIdRef.current) {
-        await saveVideoBlob(videoId, recordedBlob, recordingSeconds);
+        const videoId = currentSavedVideoIdRef.current || `vid-${currentQ.id}-${Date.now()}`;
         currentSavedVideoIdRef.current = videoId;
+
+        // 1. Store the complete binary recording first. This operation is independent
+        // from Gemini, so a failed transcript never destroys the recording.
+        const upload = await api.share.uploadVideo(token, currentQ.id, videoId, recordedBlob, recordingSeconds);
+        uploadedVideo = upload.videoRecording;
+
+        // 2. Ask the server to transcribe the already-stored video. The browser
+        // does not send the large base64 payload again.
+        try {
+          const transcript = await api.gemini.transcribeVideo({
+            videoId,
+            questionText: currentQ.questionText,
+            category: currentQ.category,
+            durationSeconds: recordingSeconds,
+          });
+          finalTranscript = transcript?.transcript?.trim() || '';
+          finalSentiment = transcript;
+          setLiveTranscript(finalTranscript);
+          setSentimentResult({
+            sentiment: transcript.sentiment || 'neutral',
+            sentimentScore: transcript.sentimentScore ?? 50,
+            sentimentTone: `${(transcript.sentiment || 'neutral').toUpperCase()} • AI Analysis`,
+            keyRequirements: transcript.keyRequirements || [],
+          });
+        } catch (transcriptionError) {
+          // The video is already safely stored. Keep submission moving and clearly
+          // mark transcription as unavailable rather than rejecting the evidence.
+          console.warn('Video stored successfully but transcription failed:', transcriptionError);
+          setCameraError('Video saved successfully. Automatic transcription was unavailable, but the interviewer will still receive and can play the recording.');
+        }
       }
 
       const responsePayload = {
@@ -613,16 +630,16 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
         audioDurationSeconds: recordingSeconds || undefined,
         videoRecording: recordedBlob
           ? {
-              id: videoId,
+              ...uploadedVideo,
+              id: uploadedVideo?.id || currentSavedVideoIdRef.current,
               durationSeconds: recordingSeconds,
-              mimeType: recordedBlob.type || 'video/webm',
               compressionStats: compressionMetrics || calculateCompressionStats(recordingSeconds, recordedBlob.size),
-              recordedAt: new Date().toISOString(),
-              videoUrl: `/api/videos/${videoId}/playback`,
-              base64Data: base64Media || undefined,
+              recordedAt: uploadedVideo?.recordedAt || new Date().toISOString(),
+              storageStatus: 'saved',
+              videoUrl: uploadedVideo?.videoUrl || `/api/videos/${currentSavedVideoIdRef.current}/playback`,
             }
           : undefined,
-        aiTranscript: recordedBlob
+        aiTranscript: recordedBlob && finalTranscript
           ? {
               transcript: finalTranscript,
               sentiment: finalSentiment?.sentiment || 'neutral',
@@ -630,26 +647,19 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
               sentimentTone: finalSentiment?.sentimentTone || 'Video Analysis',
               keyRequirements: finalSentiment?.keyRequirements || [],
               generatedAt: new Date().toISOString(),
-              modelUsed: 'gemini-3.8-flash',
+              modelUsed: finalSentiment?.modelUsed || 'server-transcription',
             }
           : undefined,
       };
 
-      // 3. Submit to server
+      // 3. Submit only lightweight response metadata. The actual video is already
+      // stored in the dedicated video database.
       const res = await api.share.submitAnswer(token, responsePayload);
-
-      setSubmittedAnswers((prev) => ({
-        ...prev,
-        [currentQ.id]: res.response || responsePayload,
-      }));
+      setSubmittedAnswers((prev) => ({ ...prev, [currentQ.id]: res.response || responsePayload }));
 
       if (res.isComplete || currentQIndex + 1 >= sessionData.questions.length) {
         setIsCompleted(true);
-        confetti({
-          particleCount: 80,
-          spread: 70,
-          origin: { y: 0.6 },
-        });
+        confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
       } else {
         setCurrentQIndex((prev) => prev + 1);
       }
@@ -659,7 +669,6 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
       setIsSubmitting(false);
     }
   };
-
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
