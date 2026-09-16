@@ -33,7 +33,7 @@ jobs:
         run: npm install --no-package-lock
 
       - name: Build project
-        run: bun run build
+        run: npm run build
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
