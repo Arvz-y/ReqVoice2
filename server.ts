@@ -338,6 +338,41 @@ const deleteInterviewFromDatabase = (interviewId: string) => {
   videoDatabase.prepare('DELETE FROM interview_sessions WHERE id = ?').run(interviewId);
 };
 
+const findPersistedInterviewById = (id: string): StoredInterview | undefined => {
+  // SQLite is authoritative; the in-memory array is only a compatibility cache.
+  const row = videoDatabase.prepare(
+    'SELECT session_json FROM interview_sessions WHERE id = ? LIMIT 1'
+  ).get(id) as any;
+  if (row?.session_json) {
+    try {
+      const interview = JSON.parse(String(row.session_json)) as StoredInterview;
+      if (interview?.id && interview?.shareToken && Array.isArray(interview.questions) && interview.responses) {
+        return interview;
+      }
+    } catch (error) {
+      console.error("Corrupt persisted interview session:", id, error);
+    }
+  }
+  return interviewsDb.find((i) => i.id === id);
+};
+
+const findPersistedInterviewByShareToken = (token: string): StoredInterview | undefined => {
+  const row = videoDatabase.prepare(
+    'SELECT session_json FROM interview_sessions WHERE share_token = ? LIMIT 1'
+  ).get(token) as any;
+  if (row?.session_json) {
+    try {
+      const interview = JSON.parse(String(row.session_json)) as StoredInterview;
+      if (interview?.id && interview?.shareToken && Array.isArray(interview.questions) && interview.responses) {
+        return interview;
+      }
+    } catch (error) {
+      console.error("Corrupt persisted interview session for share token:", token, error);
+    }
+  }
+  return interviewsDb.find((i) => i.shareToken === token);
+};
+
 const loadInterviewsFromDatabase = (): StoredInterview[] => {
   const rows = videoDatabase.prepare(
     'SELECT session_json FROM interview_sessions ORDER BY updated_at DESC'
@@ -835,7 +870,7 @@ app.get("/api/interviews", (req: Request, res: Response) => {
 
 app.get("/api/interviews/:id", (req: Request, res: Response) => {
   const user = getAuthUser(req);
-  const interview = loadInterviewsFromDatabase().find((i) => i.id === req.params.id);
+  const interview = findPersistedInterviewById(req.params.id);
   if (!interview) {
     res.status(404).json({ error: "Interview record not found" });
     return;
@@ -919,7 +954,7 @@ app.post("/api/interviews", (req: Request, res: Response) => {
 });
 
 app.post("/api/interviews/:id/response", async (req: Request, res: Response) => {
-  const interview = loadInterviewsFromDatabase().find((i) => i.id === req.params.id);
+  const interview = findPersistedInterviewById(req.params.id);
   if (!interview) {
     res.status(404).json({ error: "Interview not found" });
     return;
@@ -1187,7 +1222,7 @@ app.delete("/api/interviews/:id", (req: Request, res: Response) => {
 
 // 4. Public Share Portal for Interviewee
 app.get("/api/share/:token", (req: Request, res: Response) => {
-  const interview = loadInterviewsFromDatabase().find((i) => i.shareToken === req.params.token);
+  const interview = findPersistedInterviewByShareToken(req.params.token);
   if (!interview) {
     res.status(404).json({ error: "This interview link is either invalid, expired, or has been deactivated." });
     return;
@@ -1220,7 +1255,7 @@ app.post(
   "/api/share/:token/video",
   express.raw({ type: ["video/*", "application/octet-stream"], limit: "20mb" }),
   async (req: Request, res: Response) => {
-    const interview = loadInterviewsFromDatabase().find((i) => i.shareToken === req.params.token);
+    const interview = findPersistedInterviewByShareToken(req.params.token);
     if (!interview) {
       res.status(404).json({ error: "Interview session expired or not found." });
       return;
@@ -1394,7 +1429,7 @@ app.post(
   }
 );
 app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
-  const interview = loadInterviewsFromDatabase().find((i) => i.shareToken === req.params.token);
+  const interview = findPersistedInterviewByShareToken(req.params.token);
   if (!interview) {
     res.status(404).json({ error: "Interview session expired or not found" });
     return;
