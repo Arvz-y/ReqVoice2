@@ -640,7 +640,7 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
 
       setSubmittedAnswers((prev) => ({
         ...prev,
-        [currentQ.id]: responsePayload,
+        [currentQ.id]: res.response || responsePayload,
       }));
 
       if (res.isComplete || currentQIndex + 1 >= sessionData.questions.length) {
