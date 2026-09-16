@@ -1327,7 +1327,7 @@ app.post(
   "/api/share/:token/video",
   express.raw({ type: ["video/*", "application/octet-stream"], limit: "20mb" }),
   async (req: Request, res: Response) => {
-    const interview = findPersistedInterviewByShareToken(req.params.token);
+    const interview = (supabase ? await getRemoteInterviewByShareToken(req.params.token) : undefined) || findPersistedInterviewByShareToken(req.params.token);
     if (!interview) {
       res.status(404).json({ error: "Interview session expired or not found." });
       return;
@@ -1508,7 +1508,7 @@ app.post(
   }
 );
 app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
-  const interview = findPersistedInterviewByShareToken(req.params.token);
+  const interview = (supabase ? await getRemoteInterviewByShareToken(req.params.token) : undefined) || findPersistedInterviewByShareToken(req.params.token);
   if (!interview) {
     res.status(404).json({ error: "Interview session expired or not found" });
     return;
