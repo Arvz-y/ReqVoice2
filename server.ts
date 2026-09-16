@@ -1081,10 +1081,8 @@ app.post("/api/gemini/suggest-questions", async (req: Request, res: Response) =>
     "Semi-Structured";
 
   let typeGuidance = "";
-  let baseFallback: StoredQuestion[] = SEMI_STRUCTURED_QUESTIONS;
 
   if (interviewType === "Structured") {
-    baseFallback = STRUCTURED_QUESTIONS;
     typeGuidance = `
 INTERVIEW METHODOLOGY: 1. STRUCTURED INTERVIEW
 - Rigorously standardized, quantifiable, precise, and closed-loop question structure.
@@ -1092,7 +1090,6 @@ INTERVIEW METHODOLOGY: 1. STRUCTURED INTERVIEW
 - Avoid conversational fluff or subjective philosophy. Every question must be measurable.
 - Suggested follow-ups must verify concrete numbers, validation criteria, boundary parameters, or acceptance test thresholds.`;
   } else if (interviewType === "Unstructured") {
-    baseFallback = UNSTRUCTURED_QUESTIONS;
     typeGuidance = `
 INTERVIEW METHODOLOGY: 3. UNSTRUCTURED INTERVIEW
 - Open-ended, conversational, and exploratory inquiry designed to uncover the human narrative.
@@ -1149,6 +1146,7 @@ Format as JSON array of objects:
         process.env.GEMINI_QUESTION_MODEL,
         "gemini-2.5-flash",
         "gemini-2.0-flash",
+        "gemini-2.0-flash-001",
         "gemini-2.5-pro",
       ].filter(Boolean) as string[];
       let response: any;
