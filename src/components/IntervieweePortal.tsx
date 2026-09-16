@@ -252,16 +252,17 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
       setRecordingSeconds(0);
       setSentimentResult(null);
 
-      // Prefer a broadly compatible MP4 recording when the browser supports it.
-      // Fall back to WebM only when MP4 MediaRecorder is unavailable. The server
-      // also converts WebM to H.264/AAC MP4 before delivery when FFmpeg is available.
+      // Use the browser-native WebM capture format first because Chrome/Edge
+      // reliably produce playable VP8/Opus recordings with the webcam. Safari
+      // can fall back to MP4 when WebM is unavailable. The server converts the
+      // saved WebM to H.264/AAC MP4 for broad playback/download compatibility.
       const supportedMimeTypes = [
-        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-        'video/mp4',
         'video/webm;codecs=vp8,opus',
         'video/webm',
+        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+        'video/mp4',
       ];
-      const mimeType = supportedMimeTypes.find((type) => MediaRecorder.isTypeSupported(type)) || 'video/webm';
+      const mimeType = supportedMimeTypes.find((type) => MediaRecorder.isTypeSupported(type)) || '';
 
       const recorder = new MediaRecorder(mediaStreamRef.current, {
         mimeType,
@@ -275,9 +276,18 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
         }
       };
 
+      recorder.onerror = (event: any) => {
+        console.error('MediaRecorder error:', event?.error || event);
+        setCameraError(
+          event?.error?.message ||
+            'The browser stopped the recording unexpectedly. Please try recording again.'
+        );
+      };
+
       recorder.onstop = async () => {
+        const actualMimeType = recorder.mimeType || mimeType || 'video/webm';
         const completeBlob = new Blob(recordedChunksRef.current, {
-          type: mimeType || 'video/webm',
+          type: actualMimeType,
         });
         const measuredDuration = recordingStartedAtRef.current
           ? Math.max(0, (Date.now() - recordingStartedAtRef.current) / 1000)
@@ -297,6 +307,46 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
 
         const videoUrl = URL.createObjectURL(completeBlob);
         setRecordedVideoUrl(videoUrl);
+
+        // Verify that the assembled Blob is actually readable by this browser
+        // before allowing submission. Individual MediaRecorder chunks are not
+        // necessarily playable until they are reassembled in onstop.
+        try {
+          const probe = document.createElement('video');
+          probe.preload = 'metadata';
+          probe.src = videoUrl;
+          await new Promise<void>((resolve, reject) => {
+            const timeout = window.setTimeout(
+              () => reject(new Error('Timed out while validating the recording')),
+              5000
+            );
+            probe.onloadedmetadata = () => {
+              window.clearTimeout(timeout);
+              resolve();
+            };
+            probe.onerror = () => {
+              window.clearTimeout(timeout);
+              reject(new Error('The browser could not decode the recorded media'));
+            };
+          });
+          if (!Number.isFinite(probe.duration) || probe.duration <= 0) {
+            throw new Error('The recording has no valid media duration');
+          }
+          probe.removeAttribute('src');
+          probe.load();
+        } catch (validationError: any) {
+          console.error('Recorded media validation failed:', validationError);
+          URL.revokeObjectURL(videoUrl);
+          setRecordedBlob(null);
+          setRecordedVideoUrl(null);
+          setCameraError(
+            'The recording was created but could not be decoded by this browser. Please record again using the current camera/microphone.'
+          );
+          setIsRecording(false);
+          recordingStartedAtRef.current = null;
+          mediaRecorderRef.current = null;
+          return;
+        }
 
         // Store video in local IndexedDB and record ID for cleanup on re-record
         const currentQ = sessionData?.questions?.[currentQIndex];
@@ -328,7 +378,7 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
       };
 
       mediaRecorderRef.current = recorder;
-      recorder.start(1000);
+      recorder.start(250);
       recordingStartedAtRef.current = Date.now();
       setIsRecording(true);
 
@@ -340,18 +390,16 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
     }
   };
 
-  // Stop recording only after asking MediaRecorder to flush its final chunk.
-  // Without requestData(), some browsers can leave the last media chunk pending,
-  // producing a tiny/invalid WebM (for example a few bytes) on upload.
+  // MediaRecorder.stop() automatically emits the final dataavailable event
+  // before onstop, so let the recorder finalize its last chunk naturally.
   const stopRecording = () => {
     const recorder = mediaRecorderRef.current;
     if (recorder && isRecording) {
       try {
-        if (recorder.state === 'recording') recorder.requestData();
+        if (recorder.state === 'recording') recorder.stop();
       } catch (err) {
-        console.warn('Unable to flush final recording chunk:', err);
+        console.warn('Unable to stop media recorder:', err);
       }
-      recorder.stop();
       setIsRecording(false);
     }
     if (timerIntervalRef.current) {
