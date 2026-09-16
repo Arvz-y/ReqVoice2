@@ -696,29 +696,6 @@ async function persistSystemRemotely(system: StoredSystem): Promise<void> {
   if (error) throw new Error("Supabase system save failed: " + error.message);
 }
 
-// Authentication is managed by Supabase Auth. The application session token only
-// identifies the already-authenticated Supabase user to ReqVoice API routes.
-const activeSessions = new Map<string, StoredUser>();
-const authSessionSecret = process.env.REQVOICE_SESSION_SECRET || supabaseServiceRoleKey || "reqvoice-local-development-secret";
-function createPersistentAuthToken(userId: string): string {
-  const payload = Buffer.from(userId, "utf8").toString("base64url");
-  const signature = crypto.createHmac("sha256", authSessionSecret).update(payload).digest("base64url");
-  return `rv2.${payload}.${signature}`;
-}
-function verifyPersistentAuthToken(token: string): string | null {
-  const parts = token.split("."); if (parts.length !== 3 || parts[0] !== "rv2") return null;
-  const expected = crypto.createHmac("sha256", authSessionSecret).update(parts[1]).digest("base64url");
-  const a=Buffer.from(parts[2]), b=Buffer.from(expected);
-  if (a.length!==b.length || !crypto.timingSafeEqual(a,b)) return null;
-  try { return Buffer.from(parts[1], "base64url").toString("utf8"); } catch { return null; }
-}
-function getAuthUser(req: Request): StoredUser | null {
-  const h=req.headers.authorization; if(!h) return null; const token=h.replace(/^Bearer\\s+/i,"").trim(); if(!token) return null;
-  const cached=activeSessions.get(token); if(cached) return cached;
-  const id=verifyPersistentAuthToken(token); if(!id) return null; const user=usersDb.find(u=>u.id===id)||null; if(user) activeSessions.set(token,user); return user;
-}
-function sanitizeUser(user: StoredUser) { const { password, ...safe } = user; return safe; }
-
 // ========================
 // API ROUTES
 // ========================
