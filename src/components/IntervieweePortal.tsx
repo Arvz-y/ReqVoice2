@@ -313,6 +313,19 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
         const videoUrl = URL.createObjectURL(completeBlob);
         setRecordedVideoUrl(videoUrl);
 
+        // Step 1: immediately persist the complete recording locally as a temporary
+        // preview copy. Nothing is uploaded to the interviewer yet.
+        const currentQ = sessionData?.questions?.[currentQIndex];
+        const vidId = `vid-${currentQ?.id || 'q'}-${Date.now()}`;
+        currentSavedVideoIdRef.current = vidId;
+        try {
+          await saveVideoBlob(vidId, completeBlob, finalDuration);
+        } catch (err) {
+          console.warn('Temporary local video storage error:', err);
+          setCameraError('The recording could not be saved for preview. Please re-record before submitting.');
+          setRecordingPlayable(false);
+        }
+
         // Verify that the assembled Blob is actually readable by this browser
         // before allowing submission. Individual MediaRecorder chunks are not
         // necessarily playable until they are reassembled in onstop.
@@ -349,16 +362,6 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
           );
         } finally {
           setTestingRecording(false);
-        }
-
-        // Store video in local IndexedDB and record ID for cleanup on re-record
-        const currentQ = sessionData?.questions?.[currentQIndex];
-        const vidId = `vid-${currentQ?.id || 'q'}-${Date.now()}`;
-        currentSavedVideoIdRef.current = vidId;
-        try {
-          await saveVideoBlob(vidId, completeBlob, finalDuration);
-        } catch (err) {
-          console.warn('Local video storage error:', err);
         }
 
         // Calculate space-saving compression metric
