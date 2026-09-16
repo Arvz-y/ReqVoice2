@@ -305,15 +305,22 @@ const transcodeToCompatibleMp4 = (videoId: string, sourcePath: string): Promise<
   if (existingJob) return existingJob;
 
   const outputPath = getVideoFilePath(videoId, "mp4");
-  if (fs.existsSync(outputPath)) return Promise.resolve(outputPath);
+  if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 1024) {
+    return Promise.resolve(outputPath);
+  }
+  try {
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+  } catch {}
 
-  if (!ffmpegPath) {
-    console.warn("FFmpeg binary is unavailable; keeping the original recording.");
+  if (!ffmpegPath || !fs.existsSync(ffmpegPath as string)) {
+    console.error("FFmpeg binary is unavailable; cannot create a compatible MP4 copy.");
     return Promise.resolve(null);
   }
 
   const job = new Promise<string | null>((resolve) => {
     const args = [
+      "-hide_banner",
+      "-loglevel", "error",
       "-y",
       "-i", sourcePath,
       "-map", "0:v:0?",
@@ -325,6 +332,7 @@ const transcodeToCompatibleMp4 = (videoId: string, sourcePath: string): Promise<
       "-c:a", "aac",
       "-b:a", "128k",
       "-movflags", "+faststart",
+      "-shortest",
       outputPath,
     ];
 
@@ -332,21 +340,21 @@ const transcodeToCompatibleMp4 = (videoId: string, sourcePath: string): Promise<
     let stderr = "";
     child.stderr.on("data", (chunk) => {
       stderr += String(chunk);
-      if (stderr.length > 4000) stderr = stderr.slice(-4000);
+      if (stderr.length > 6000) stderr = stderr.slice(-6000);
     });
 
     child.on("error", (err) => {
-      console.warn(`Video MP4 conversion failed for ${videoId}:`, err.message);
+      console.error(`Video MP4 conversion failed for ${videoId}:`, err.message);
       try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch {}
       resolve(null);
     });
 
     child.on("close", (code) => {
-      if (code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
-        console.log(`Video MP4 playback copy ready: ${videoId}`);
+      if (code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 1024) {
+        console.log(`Video MP4 playback copy ready: ${videoId} (${fs.statSync(outputPath).size} bytes)`);
         resolve(outputPath);
       } else {
-        console.warn(`Video MP4 conversion exited with code ${code} for ${videoId}.`, stderr.slice(-1000));
+        console.error(`Video MP4 conversion exited with code ${code} for ${videoId}.`, stderr.slice(-2500));
         try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch {}
         resolve(null);
       }
@@ -356,6 +364,21 @@ const transcodeToCompatibleMp4 = (videoId: string, sourcePath: string): Promise<
   videoTranscodeJobs.set(videoId, job);
   void job.finally(() => videoTranscodeJobs.delete(videoId));
   return job;
+};
+
+const detectVideoContainer = (buffer: Buffer): { extension: "mp4" | "webm" | "ogg"; mimeType: string } | null => {
+  // Detect the actual container from its bytes instead of trusting a browser MIME
+  // label. This prevents a WebM payload from being saved with the wrong extension.
+  if (buffer.length >= 12 && buffer.subarray(4, 8).toString("ascii") === "ftyp") {
+    return { extension: "mp4", mimeType: "video/mp4" };
+  }
+  if (buffer.length >= 4 && buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) {
+    return { extension: "webm", mimeType: "video/webm" };
+  }
+  if (buffer.length >= 4 && buffer.subarray(0, 4).toString("ascii") === "OggS") {
+    return { extension: "ogg", mimeType: "video/ogg" };
+  }
+  return null;
 };
 
 const findOriginalVideoPath = (videoId: string): { path: string; mimeType: string; extension: string } | null => {
@@ -805,37 +828,72 @@ app.post("/api/interviews/:id/response", async (req: Request, res: Response) => 
       videoRecording.videoUrl = "/api/videos/" + videoRecording.id + "/playback";
     } else {
       try {
-        const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64,/, "");
+        const rawBase64 = String(videoRecording.base64Data || "");
+        const cleanBase64 = rawBase64.replace(/^data:[^;]+;base64,/i, "").replace(/\s/g, "");
+        if (cleanBase64.length < 1000) {
+          throw new Error(`Encoded video payload is too small (${cleanBase64.length} base64 characters)`);
+        }
+
         const videoBuffer = Buffer.from(cleanBase64, "base64");
-        if (!videoBuffer.length) throw new Error("Empty video payload");
-      const mimeType = videoRecording.mimeType || "video/webm";
-      const extension = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
-      videosStore.set(videoRecording.id, {
-        id: videoRecording.id,
-        interviewId: interview.id,
-        questionId,
-        mimeType,
-        buffer: videoBuffer,
-        durationSeconds: videoRecording.durationSeconds || 0,
-        recordedAt: videoRecording.recordedAt || new Date().toISOString(),
-      });
-      const originalPath = path.join(userVideosDir, videoRecording.id + "." + extension);
-      fs.writeFileSync(originalPath, videoBuffer);
+        if (videoBuffer.length < 1024) {
+          throw new Error(`Video payload is incomplete (${videoBuffer.length} bytes)`);
+        }
 
-      // Convert WebM/other browser-native recordings immediately so every
-      // completed submission has a standard MP4 artifact for download and
-      // external/device playback. The original capture remains preserved.
-      let deliveryExtension = extension;
-      if (extension !== "mp4") {
-        const compatibleMp4 = await transcodeToCompatibleMp4(videoRecording.id, originalPath);
-        if (compatibleMp4) deliveryExtension = "mp4";
-      }
+        const detected = detectVideoContainer(videoBuffer);
+        if (!detected) {
+          throw new Error("The uploaded bytes are not a recognized MP4, WebM, or Ogg video container");
+        }
 
-      videoRecording.videoUrl = "/api/videos/" + videoRecording.id + "/playback";
-      videoRecording.storageStatus = "saved";
-      videoRecording.storagePath = "video_vault/" + videoRecording.id + "." + deliveryExtension;
-      videoRecording.mimeType = deliveryExtension === "mp4" ? "video/mp4" : mimeType;
-      delete videoRecording.base64Data;
+        const extension = detected.extension;
+        const mimeType = detected.mimeType;
+        console.log(`Saving interview video ${videoRecording.id}: ${videoBuffer.length} bytes, detected ${mimeType}`);
+
+        const originalPath = getVideoFilePath(videoRecording.id, extension);
+        fs.writeFileSync(originalPath, videoBuffer);
+        if (!fs.existsSync(originalPath) || fs.statSync(originalPath).size !== videoBuffer.length) {
+          throw new Error("Server failed to persist the complete video payload");
+        }
+
+        videosStore.set(videoRecording.id, {
+          id: videoRecording.id,
+          interviewId: interview.id,
+          questionId,
+          mimeType,
+          buffer: videoBuffer,
+          durationSeconds: videoRecording.durationSeconds || 0,
+          recordedAt: videoRecording.recordedAt || new Date().toISOString(),
+        });
+
+        // Keep transcription independent from media persistence. The original
+        // capture is already stored even if AI later fails. For WebM/Ogg, create
+        // a standard H.264/AAC MP4 delivery copy for browser and device playback.
+        let deliveryExtension = extension;
+        if (extension !== "mp4") {
+          const compatibleMp4 = await transcodeToCompatibleMp4(videoRecording.id, originalPath);
+          if (compatibleMp4) {
+            deliveryExtension = "mp4";
+            const mp4Buffer = fs.readFileSync(compatibleMp4);
+            if (mp4Buffer.length > 1024) {
+              videosStore.set(videoRecording.id, {
+                id: videoRecording.id,
+                interviewId: interview.id,
+                questionId,
+                mimeType: "video/mp4",
+                buffer: mp4Buffer,
+                durationSeconds: videoRecording.durationSeconds || 0,
+                recordedAt: videoRecording.recordedAt || new Date().toISOString(),
+              });
+            }
+          }
+        }
+
+        videoRecording.videoUrl = "/api/videos/" + videoRecording.id + "/playback";
+        videoRecording.storageStatus = "saved";
+        videoRecording.storagePath = "video_vault/" + videoRecording.id + "." + deliveryExtension;
+        videoRecording.mimeType = deliveryExtension === "mp4" ? "video/mp4" : mimeType;
+        videoRecording.sourceMimeType = mimeType;
+        videoRecording.deliveryMimeType = videoRecording.mimeType;
+
       } catch (err) {
         console.warn("Could not save video recording:", err);
         const message = err instanceof Error ? err.message : "Unknown media storage error";
