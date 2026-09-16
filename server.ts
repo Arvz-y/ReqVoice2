@@ -1158,10 +1158,8 @@ Format as JSON array of objects:
       // Use currently supported stable text-generation models first.
       // Do not let an old/unsupported Render GEMINI_QUESTION_MODEL value
       // override the working Flash models.
-      const requestedModel = process.env.GEMINI_QUESTION_MODEL?.trim();
-      // Render's Gemini API is returning the currently supported model names
-      // directly. Prefer those models and do not let an obsolete environment
-      // value such as gemini-2.5-pro break question generation.
+      // Gemini has reported the currently available models for this API key.
+      // Keep an optional custom model as a fallback, but never use retired models.
       const requestedModel = process.env.GEMINI_QUESTION_MODEL?.trim();
       const modelCandidates = [
         "gemini-3.6-flash",
@@ -1179,9 +1177,34 @@ Format as JSON array of objects:
           : []),
       ].filter((model, index, all) => all.indexOf(model) === index);
 
-      let response: any;
-      let lastModelError: any;
+      let response: any = null;
+      let lastModelError: any = null;
       const modelErrors: string[] = [];
+
+      // Try each supported model independently. A temporary 503 from one model
+      // must not prevent the next available model from generating the questions.
+      for (const model of modelCandidates) {
+        try {
+          const candidateResponse = await ai.models.generateContent({
+            model,
+            contents: systemInstruction,
+          });
+          if (candidateResponse?.text?.trim()) {
+            response = candidateResponse;
+            console.log("Gemini question generation succeeded:", model);
+            break;
+          }
+          throw new Error("Gemini returned an empty response.");
+        } catch (err: any) {
+          const message =
+            err?.message ||
+            err?.error?.message ||
+            (typeof err === "string" ? err : JSON.stringify(err));
+          lastModelError = err instanceof Error ? err : new Error(message);
+          modelErrors.push(`${model}: ${message}`);
+          console.warn("Gemini question model failed:", model, message);
+        }
+      }
 
       if (!response?.text) {
         throw lastModelError || new Error("No Gemini model returned questions.");
