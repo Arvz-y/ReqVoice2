@@ -4,6 +4,8 @@ import fs from "fs";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import { createServer as createViteServer } from "vite";
+import { spawn } from "child_process";
+import ffmpegPath from "ffmpeg-static";
 
 dotenv.config();
 
@@ -288,6 +290,90 @@ const userVideosDir = path.join(process.cwd(), "user-videos");
 if (!fs.existsSync(userVideosDir)) {
   fs.mkdirSync(userVideosDir, { recursive: true });
 }
+
+// Browser MediaRecorder commonly produces WebM/VP8/Opus. That is excellent for
+// browser capture, but Windows Media Player and some mobile/default players may
+// reject the container/codec. Keep the original recording untouched as evidence
+// and create a broadly compatible H.264/AAC MP4 playback copy.
+const videoTranscodeJobs = new Map<string, Promise<string | null>>();
+
+const getVideoFilePath = (videoId: string, extension: string) =>
+  path.join(userVideosDir, `${videoId}.${extension}`);
+
+const transcodeToCompatibleMp4 = (videoId: string, sourcePath: string): Promise<string | null> => {
+  const existingJob = videoTranscodeJobs.get(videoId);
+  if (existingJob) return existingJob;
+
+  const outputPath = getVideoFilePath(videoId, "mp4");
+  if (fs.existsSync(outputPath)) return Promise.resolve(outputPath);
+
+  if (!ffmpegPath) {
+    console.warn("FFmpeg binary is unavailable; keeping the original recording.");
+    return Promise.resolve(null);
+  }
+
+  const job = new Promise<string | null>((resolve) => {
+    const args = [
+      "-y",
+      "-i", sourcePath,
+      "-map", "0:v:0?",
+      "-map", "0:a:0?",
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "23",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "aac",
+      "-b:a", "128k",
+      "-movflags", "+faststart",
+      outputPath,
+    ];
+
+    const child = spawn(ffmpegPath as string, args, { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+      if (stderr.length > 4000) stderr = stderr.slice(-4000);
+    });
+
+    child.on("error", (err) => {
+      console.warn(`Video MP4 conversion failed for ${videoId}:`, err.message);
+      try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch {}
+      resolve(null);
+    });
+
+    child.on("close", (code) => {
+      if (code === 0 && fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+        console.log(`Video MP4 playback copy ready: ${videoId}`);
+        resolve(outputPath);
+      } else {
+        console.warn(`Video MP4 conversion exited with code ${code} for ${videoId}.`, stderr.slice(-1000));
+        try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch {}
+        resolve(null);
+      }
+    });
+  });
+
+  videoTranscodeJobs.set(videoId, job);
+  void job.finally(() => videoTranscodeJobs.delete(videoId));
+  return job;
+};
+
+const findOriginalVideoPath = (videoId: string): { path: string; mimeType: string; extension: string } | null => {
+  const safeId = videoId.replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!safeId || safeId !== videoId) return null;
+
+  for (const extension of ["webm", "mp4", "ogg"]) {
+    const filePath = getVideoFilePath(safeId, extension);
+    if (fs.existsSync(filePath)) {
+      const mimeType =
+        extension === "mp4" ? "video/mp4" :
+        extension === "ogg" ? "video/ogg" :
+        "video/webm";
+      return { path: filePath, mimeType, extension };
+    }
+  }
+  return null;
+};
 
 
 interface StoredUser {
@@ -716,7 +802,7 @@ app.post("/api/interviews/:id/response", (req: Request, res: Response) => {
     // A previously persisted recording can be submitted again without its
     // base64 payload. Do not try to decode an undefined value.
     if (!videoRecording.base64Data && videoRecording.storageStatus === "saved") {
-      videoRecording.videoUrl = "/api/videos/" + videoRecording.id;
+      videoRecording.videoUrl = "/api/videos/" + videoRecording.id + "/playback";
     } else {
       try {
         const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64,/, "");
@@ -734,7 +820,7 @@ app.post("/api/interviews/:id/response", (req: Request, res: Response) => {
         recordedAt: videoRecording.recordedAt || new Date().toISOString(),
       });
       fs.writeFileSync(path.join(userVideosDir, videoRecording.id + "." + extension), videoBuffer);
-      videoRecording.videoUrl = "/api/videos/" + videoRecording.id;
+      videoRecording.videoUrl = "/api/videos/" + videoRecording.id + "/playback";
       videoRecording.storageStatus = "saved";
       videoRecording.storagePath = "video_vault/" + videoRecording.id + "." + extension;
         delete videoRecording.base64Data;
@@ -1046,17 +1132,9 @@ const resolveStoredVideo = (videoId: string): { buffer: Buffer; mimeType: string
     return { buffer: cached.buffer, mimeType: cached.mimeType || "video/webm" };
   }
 
-  const safeId = videoId.replace(/[^a-zA-Z0-9_-]/g, "");
-  if (!safeId || safeId !== videoId) return null;
-
-  for (const extension of ["webm", "mp4", "ogg"]) {
-    const filePath = path.join(userVideosDir, safeId + "." + extension);
-    if (fs.existsSync(filePath)) {
-      const mimeType = extension === "mp4" ? "video/mp4" : extension === "ogg" ? "video/ogg" : "video/webm";
-      return { buffer: fs.readFileSync(filePath), mimeType };
-    }
-  }
-  return null;
+  const original = findOriginalVideoPath(videoId);
+  if (!original) return null;
+  return { buffer: fs.readFileSync(original.path), mimeType: original.mimeType };
 };
 
 const streamStoredVideo = (req: Request, res: Response, download = false) => {
@@ -1100,12 +1178,95 @@ const streamStoredVideo = (req: Request, res: Response, download = false) => {
   res.end(stored.buffer.subarray(start, end + 1));
 };
 
+const streamFileWithRanges = (req: Request, res: Response, filePath: string, mimeType: string, downloadName?: string) => {
+  if (!fs.existsSync(filePath)) {
+    res.status(404).json({ error: "Recorded video file not found." });
+    return;
+  }
+
+  const total = fs.statSync(filePath).size;
+  res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Content-Type", mimeType);
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  if (downloadName) {
+    res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+  }
+
+  const range = req.headers.range;
+  if (!range) {
+    res.setHeader("Content-Length", total);
+    fs.createReadStream(filePath).pipe(res);
+    return;
+  }
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+  if (!match) {
+    res.status(416).setHeader("Content-Range", `bytes */${total}`).end();
+    return;
+  }
+
+  const start = match[1] ? Number(match[1]) : Math.max(0, total - Number(match[2] || 1));
+  const end = match[2] ? Math.min(total - 1, Number(match[2])) : total - 1;
+  if (start > end || start >= total) {
+    res.status(416).setHeader("Content-Range", `bytes */${total}`).end();
+    return;
+  }
+
+  res.status(206);
+  res.setHeader("Content-Range", `bytes ${start}-${end}/${total}`);
+  res.setHeader("Content-Length", end - start + 1);
+  fs.createReadStream(filePath, { start, end }).pipe(res);
+};
+
 app.get("/api/videos/:id", (req: Request, res: Response) => {
   streamStoredVideo(req, res);
 });
 
-app.get("/api/videos/:id/download", (req: Request, res: Response) => {
-  streamStoredVideo(req, res, true);
+// Always prefer an H.264/AAC MP4 for browser and OS/default-player compatibility.
+// Conversion is lazy and cached, so recordings are not blocked by AI transcription.
+app.get("/api/videos/:id/playback", async (req: Request, res: Response) => {
+  const videoId = req.params.id;
+  const original = findOriginalVideoPath(videoId);
+  if (!original) {
+    res.status(404).json({ error: "Recorded video not found." });
+    return;
+  }
+
+  if (original.extension === "mp4") {
+    streamFileWithRanges(req, res, original.path, "video/mp4");
+    return;
+  }
+
+  const mp4Path = await transcodeToCompatibleMp4(videoId, original.path);
+  if (mp4Path) {
+    streamFileWithRanges(req, res, mp4Path, "video/mp4");
+    return;
+  }
+
+  // If conversion is unavailable, preserve access to the original evidence.
+  streamFileWithRanges(req, res, original.path, original.mimeType);
+});
+
+app.get("/api/videos/:id/download", async (req: Request, res: Response) => {
+  const videoId = req.params.id;
+  const original = findOriginalVideoPath(videoId);
+  if (!original) {
+    res.status(404).json({ error: "Recorded video not found." });
+    return;
+  }
+
+  if (original.extension === "mp4") {
+    streamFileWithRanges(req, res, original.path, "video/mp4", `reqvoice_recording_${videoId}.mp4`);
+    return;
+  }
+
+  const mp4Path = await transcodeToCompatibleMp4(videoId, original.path);
+  if (mp4Path) {
+    streamFileWithRanges(req, res, mp4Path, "video/mp4", `reqvoice_recording_${videoId}.mp4`);
+    return;
+  }
+
+  streamFileWithRanges(req, res, original.path, original.mimeType, `reqvoice_recording_${videoId}.${original.extension}`);
 });
 
 // 5. AI Video & Audio Transcription Endpoint using Gemini API
