@@ -13,7 +13,7 @@ if (!code.includes('AUTH_TOKEN_TTL_SECONDS') || !code.includes('createAuthToken'
     'import fs from "fs";\nimport crypto from "crypto";\n'
   );
 
-  const authStart = code.indexOf('// Active authenticated sessions: token -> StoredUser');
+  const authStart = code.indexOf('// Signed tokens remain valid after Render restarts; the in-memory map is only a fast path.');
   const authEnd = code.indexOf('// ========================\n// API ROUTES', authStart);
   if (authStart < 0 || authEnd < 0) {
     throw new Error('[auth-patch] Could not locate authentication block in server.ts');
