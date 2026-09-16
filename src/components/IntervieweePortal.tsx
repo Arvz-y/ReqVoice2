@@ -542,7 +542,7 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
               mimeType: recordedBlob.type || 'video/webm',
               compressionStats: compressionMetrics || calculateCompressionStats(recordingSeconds, recordedBlob.size),
               recordedAt: new Date().toISOString(),
-              videoUrl: `/api/videos/${videoId}`,
+              videoUrl: `/api/videos/${videoId}/playback`,
               base64Data: base64Media || undefined,
             }
           : undefined,
