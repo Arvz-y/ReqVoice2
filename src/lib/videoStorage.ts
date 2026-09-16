@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'reqvoice_video_vault';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'compressed_recordings';
 
 interface StoredVideoRecord {
@@ -31,7 +31,11 @@ function getDB(): Promise<IDBDatabase> {
           db.createObjectStore(STORE_NAME, { keyPath: 'id' });
         }
       };
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onversionchange = () => db.close();
+        resolve(db);
+      };
       request.onerror = () => reject(request.error);
     });
   }
@@ -63,9 +67,25 @@ export async function saveVideoBlob(
       const store = tx.objectStore(STORE_NAME);
       const req = store.put(record);
       req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
+      req.onerror = () => reject(req.error || new Error('IndexedDB write failed'));
+      tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'));
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
     });
-  } catch {
+
+    // Read the bytes back before considering the temporary save successful.
+    const verify = await new Promise<StoredVideoRecord | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const req = tx.objectStore(STORE_NAME).get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error || new Error('IndexedDB verification failed'));
+    });
+    if (!verify?.blob || verify.blob.size !== blob.size) {
+      throw new Error('Temporary recording verification failed');
+    }
+  } catch (error) {
+    // Memory fallback is only valid for the current page lifetime. Keep it as a
+    // compatibility fallback, but surface failures through the returned preview URL.
+    console.warn('IndexedDB temporary video save failed; using in-memory fallback:', error);
     memoryFallback.set(id, record);
   }
 
