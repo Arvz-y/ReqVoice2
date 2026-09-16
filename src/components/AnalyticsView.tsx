@@ -101,10 +101,10 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ interviews, system
   const selectedInterview = interviews.find(i => i.id === selectedInterviewId);
   const completed = useMemo(() => interviews.filter(i => i.status === 'completed'), [interviews]);
 
-  const availableSystems = useMemo(() => {
-    const ids = new Set(completed.map(i => i.systemId));
-    return systems.filter(s => ids.has(s.id));
-  }, [systems, completed]);
+  // Keep systems visible even before the first completed interview. This lets
+  // the analytics page be the starting point for generating the demo dataset
+  // instead of trapping the user behind the "complete an interview first" state.
+  const availableSystems = useMemo(() => systems, [systems]);
 
   const [systemId, setSystemId] = useState<string>('');
   const [aiData, setAiData] = useState<AIAnalytics | null>(null);
@@ -198,11 +198,36 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ interviews, system
   };
 
   if (!systemId && availableSystems.length === 0) {
-    return <div className="rounded-2xl border border-slate-800 bg-slate-900 p-10 text-center">
-      <BarChart3 className="w-10 h-10 mx-auto text-slate-600 mb-3" />
-      <h2 className="text-lg font-bold text-white">Interview Analytics</h2>
-      <p className="text-xs text-slate-500 mt-2">Complete an interview to generate analytics for its system under study.</p>
-    </div>;
+    return (
+      <div className="rounded-2xl border border-indigo-500/20 bg-slate-900 p-8 sm:p-10 text-center">
+        <Activity className="w-10 h-10 mx-auto text-indigo-400 mb-3" />
+        <h2 className="text-lg font-bold text-white">Interview Analytics</h2>
+        <p className="text-xs text-slate-400 mt-2 max-w-lg mx-auto">
+          Analytics are generated from completed interview answers. You can first create an interview
+          from <strong className="text-slate-200">Systems & Guides</strong>, or use the demo workspace
+          to populate realistic synthetic interviews and answers.
+        </p>
+        <div className="flex flex-wrap justify-center gap-2 mt-5">
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('reqvoice:navigate', { detail: 'systems' }));
+            }}
+            className="px-4 py-2 rounded-xl border border-slate-700 text-slate-200 text-xs font-semibold hover:bg-slate-800"
+          >
+            Go to Systems & Guides
+          </button>
+          <button
+            onClick={generateDemo}
+            disabled={demoLoading}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-semibold disabled:opacity-50"
+          >
+            {demoLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+            {demoLoading ? 'Generating…' : 'Set Up Demo Interviews'}
+          </button>
+        </div>
+        {demoMessage && <div className="text-[10px] text-emerald-300 mt-4">{demoMessage}</div>}
+      </div>
+    );
   }
 
   return (
@@ -211,6 +236,11 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ interviews, system
         <div>
           <h2 className="text-xl sm:text-2xl font-bold text-white font-heading">Interview Analytics</h2>
           <p className="text-xs text-slate-400 mt-1">Analytics are scoped to the selected system under study and calculated from completed interview answers.</p>
+          {scoped.length === 0 && (
+            <p className="text-[10px] text-amber-300 mt-2">
+              No completed answers for this system yet. Generate demo data or complete an interview to populate the charts.
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select value={systemId} onChange={e => setSystemId(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white outline-none">
