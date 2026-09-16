@@ -504,38 +504,14 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
     setTimeout(() => recorder.stop(), 1500);
   };
 
-  // Real-time transcription and automatic sentiment analysis for video/audio
-  const triggerAutoTranscriptionAndSentiment = async (blob: Blob, duration: number) => {
-    const currentQ = sessionData?.questions?.[currentQIndex];
-    if (!currentQ) return;
-
-    setAnalyzingSentiment(true);
-    try {
-      const base64Media = await blobToBase64(blob);
-      const result = await api.gemini.transcribeVideo({
-        base64Media,
-        mimeType: blob.type || 'video/webm',
-        questionText: currentQ.questionText,
-        category: currentQ.category,
-        durationSeconds: duration,
-      });
-
-      if (result) {
-        setLiveTranscript(result.transcript);
-        setSentimentResult({
-          sentiment: result.sentiment || 'constructive',
-          sentimentScore: result.sentimentScore || 82,
-          sentimentTone: `${result.sentiment.toUpperCase()} • High Confidence`,
-          keyRequirements: result.keyRequirements || [],
-        });
-      }
-    } catch (err) {
-      console.warn('Auto transcription / sentiment failed:', err);
-    } finally {
-      setAnalyzingSentiment(false);
-    }
+  // Video transcription is intentionally deferred until submission.
+  // At submit time the recording is uploaded to the server video database first,
+  // then Gemini reads the stored recording by video ID. This prevents large base64
+  // payloads from breaking recording submission.
+  const triggerAutoTranscriptionAndSentiment = async (_blob: Blob, _duration: number) => {
+    setLiveTranscript('');
+    setSentimentResult(null);
   };
-
   // Real-time sentiment analysis for typed text
   const handleAnalyzeTypedText = async () => {
     if (!typedResponse.trim()) return;
