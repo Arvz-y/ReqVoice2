@@ -5,7 +5,7 @@ const TOKEN_KEY = 'reqvoice_auth_token';
 function getAuthToken(): string | null {
   try {
     if (typeof window !== 'undefined') {
-      return sessionStorage.getItem(TOKEN_KEY);
+      return localStorage.getItem(TOKEN_KEY);
     }
   } catch {}
   return null;
@@ -15,9 +15,9 @@ function setAuthToken(token: string | null) {
   try {
     if (typeof window !== 'undefined') {
       if (token) {
-        sessionStorage.setItem(TOKEN_KEY, token);
+        localStorage.setItem(TOKEN_KEY, token);
       } else {
-        sessionStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(TOKEN_KEY);
       }
     }
   } catch {}
