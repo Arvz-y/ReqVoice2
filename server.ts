@@ -1185,17 +1185,60 @@ app.post(
     try {
       fs.writeFileSync(originalPath, videoBuffer);
       if (fs.statSync(originalPath).size !== videoBuffer.length) throw new Error("The complete video payload was not written to storage.");
-      let deliveryMimeType = detected.mimeType;
-      let deliveryBuffer: Buffer | null = detected.extension === "mp4" ? videoBuffer : null;
+      // Commit the original bytes to SQLite BEFORE any transcoding work.
+      // This keeps media persistence independent from FFmpeg and prevents
+      // a long conversion from turning a successful upload into a timeout.
+      saveVideoToDatabase({
+        id: videoId,
+        interviewId: interview.id,
+        questionId,
+        sourceMimeType: detected.mimeType,
+        sourceExtension: detected.extension,
+        originalBuffer: videoBuffer,
+        deliveryMimeType: detected.extension === "mp4" ? "video/mp4" : detected.mimeType,
+        deliveryBuffer: detected.extension === "mp4" ? videoBuffer : null,
+        durationSeconds,
+        recordedAt,
+      });
+
+      res.status(201).json({
+        success: true,
+        videoRecording: {
+          id: videoId,
+          durationSeconds,
+          mimeType: detected.extension === "mp4" ? "video/mp4" : detected.mimeType,
+          sourceMimeType: detected.mimeType,
+          deliveryMimeType: detected.extension === "mp4" ? "video/mp4" : detected.mimeType,
+          storageStatus: "saved",
+          storagePath: "video_database/interview_videos/" + videoId,
+          videoUrl: "/api/videos/" + videoId + "/playback",
+          recordedAt,
+        },
+      });
+
+      // Convert WebM/Ogg to H.264/AAC in the background. Until conversion
+      // completes, playback still works from the original SQLite BLOB.
       if (detected.extension !== "mp4") {
-        const compatibleMp4 = await transcodeToCompatibleMp4(videoId, originalPath);
-        if (compatibleMp4 && fs.existsSync(compatibleMp4)) {
+        void transcodeToCompatibleMp4(videoId, originalPath).then((compatibleMp4) => {
+          if (!compatibleMp4 || !fs.existsSync(compatibleMp4)) return;
           const candidate = fs.readFileSync(compatibleMp4);
-          if (candidate.length > 1024) { deliveryBuffer = candidate; deliveryMimeType = "video/mp4"; }
-        }
+          if (candidate.length <= 1024) return;
+          saveVideoToDatabase({
+            id: videoId,
+            interviewId: interview.id,
+            questionId,
+            sourceMimeType: detected.mimeType,
+            sourceExtension: detected.extension,
+            originalBuffer: videoBuffer,
+            deliveryMimeType: "video/mp4",
+            deliveryBuffer: candidate,
+            durationSeconds,
+            recordedAt,
+          });
+        }).catch((error) => {
+          console.warn("Background MP4 conversion failed; original recording remains available:", error);
+        });
       }
-      saveVideoToDatabase({ id: videoId, interviewId: interview.id, questionId, sourceMimeType: detected.mimeType, sourceExtension: detected.extension, originalBuffer: videoBuffer, deliveryMimeType, deliveryBuffer, durationSeconds, recordedAt });
-      res.status(201).json({ success: true, videoRecording: { id: videoId, durationSeconds, mimeType: deliveryMimeType, sourceMimeType: detected.mimeType, deliveryMimeType, storageStatus: "saved", storagePath: `video_database/interview_videos/${videoId}`, videoUrl: `/api/videos/${videoId}/playback`, recordedAt } });
     } catch (error: any) {
       console.error("Video database upload failed:", error);
       res.status(500).json({ code: "VIDEO_DATABASE_WRITE_FAILED", error: "The recording could not be saved to the video database. Please try the upload again.", details: process.env.NODE_ENV === "production" ? undefined : error?.message, retryable: true });
