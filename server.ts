@@ -1273,9 +1273,13 @@ Format as JSON array of objects:
       // Gemini has reported the currently available models for this API key.
       // Keep an optional custom model as a fallback, but never use retired models.
       const requestedModel = process.env.GEMINI_QUESTION_MODEL?.trim();
+      // Prefer current stable Flash models. Keep multiple providers/models in the
+      // fallback chain because Gemini quota can be model-specific.
       const modelCandidates = [
-        "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
         ...(requestedModel &&
         ![
           "gemini-2.5-pro",
@@ -1284,6 +1288,10 @@ Format as JSON array of objects:
           "gemini-2.0-flash",
           "gemini-2.0-flash-001",
           "gemini-3.5-flash",
+          "gemini-3.5-flash-lite",
+          "gemini-3.6-flash",
+          "gemini-3.7-flash",
+          "gemini-3.8-flash",
         ].includes(requestedModel)
           ? [requestedModel]
           : []),
@@ -1317,7 +1325,27 @@ Format as JSON array of objects:
       }
 
       if (!response?.text) {
-        throw lastModelError || new Error("No Gemini model returned questions.");
+        const quotaFailure = modelErrors.some((message) => /(?:429|RESOURCE_EXHAUSTED|quota|rate.?limit)/i.test(message));
+        const unavailableFailure = modelErrors.some((message) => /(?:503|UNAVAILABLE|high demand|temporarily)/i.test(message));
+        const details = modelErrors
+          .map((message) => message.replace(/\s+/g, " ").slice(0, 500))
+          .join(" | ");
+
+        const statusCode = quotaFailure ? 429 : unavailableFailure ? 503 : 502;
+        const errorMessage = quotaFailure
+          ? "AI question generation is temporarily unavailable because the configured Gemini project/model quota has been exhausted. Please wait for the quota window to reset or connect a billed Gemini project/API key."
+          : unavailableFailure
+            ? "Gemini question generation is temporarily unavailable because the configured models are experiencing high demand. Please try again shortly."
+            : "Gemini question generation failed. No questions were generated and no generic questions were substituted.";
+
+        res.status(statusCode).json({
+          error: errorMessage,
+          code: quotaFailure ? "AI_QUOTA_EXHAUSTED" : unavailableFailure ? "AI_MODEL_UNAVAILABLE" : "AI_GENERATION_FAILED",
+          retryable: true,
+          modelsTried: modelCandidates,
+          details,
+        });
+        return;
       }
 
       const questions = JSON.parse(response.text || "[]");
