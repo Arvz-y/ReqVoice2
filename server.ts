@@ -610,7 +610,7 @@ app.post("/api/interviews", (req: Request, res: Response) => {
     return;
   }
 
-  const { systemId, intervieweeName, intervieweeRole, intervieweeEmail, intervieweeDept, questions, interviewType } = req.body;
+  const { systemId, intervieweeName, intervieweeRole, intervieweeEmail, intervieweeDept, questions, interviewType, prompt, promptVersion } = req.body;
   const userSystems = systemsDb.filter((s) => s.userId === currentUser.id);
   const sys = userSystems.find((s) => s.id === systemId) || userSystems[0] || systemsDb[0];
 
@@ -644,6 +644,9 @@ app.post("/api/interviews", (req: Request, res: Response) => {
     status: "in_progress",
     interviewType: (interviewType === "Structured" || interviewType === "Unstructured" || interviewType === "Semi-Structured") ? interviewType : "Semi-Structured",
     questions: formattedQuestions,
+    prompt: typeof prompt === "string" ? prompt.trim() : "",
+    promptVersion: Number(promptVersion) || 1,
+    promptChangeCount: Number(promptVersion) > 0 ? Number(promptVersion) : 1,
     responses: {},
     createdAt: new Date().toISOString(),
   };
@@ -1018,7 +1021,7 @@ Analyze the spoken response and return a JSON object with:
       };
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: process.env.GEMINI_QUESTION_MODEL || "gemini-2.5-flash",
         contents,
         config: {
           responseMimeType: "application/json",
@@ -1124,7 +1127,7 @@ Format as JSON array of objects:
 ]`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: process.env.GEMINI_QUESTION_MODEL || "gemini-2.5-flash",
         contents: systemInstruction,
         config: {
           responseMimeType: "application/json",
@@ -1149,7 +1152,9 @@ Format as JSON array of objects:
     }
   }
 
-  // Fallback tailored to the prompt and interview type
+  // If an AI model is unavailable, use a deterministic prompt-derived fallback only as an
+  // emergency availability path. Normal operation above always uses the configured AI model.
+  // The prompt itself is incorporated into every generated question so changing it changes the output.
   if (customPrompt) {
     if (interviewType === "Structured") {
       const structuredPromptFallback: StoredQuestion[] = [
@@ -1487,7 +1492,7 @@ Return ONLY a valid JSON object matching this exact schema:
 }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.8-flash",
+        model: process.env.GEMINI_QUESTION_MODEL || "gemini-2.5-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
