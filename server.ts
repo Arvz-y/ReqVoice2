@@ -1370,10 +1370,71 @@ app.post("/api/share/:token/submit", async (req: Request, res: Response) => {
 
 // Video playback endpoints. These are independent from transcription so a
 // recorded answer remains playable even when AI analysis fails.
-const resolveStoredVideo = (videoId: string, preferDelivery = false): { buffer: Buffer; mimeType: string } | null => {
+const ensureCompatibleVideoDelivery = async (videoId: string) => {
+  let record = getVideoDatabaseRecord(videoId);
+  if (!record) return null;
+
+  // MP4 recordings are already in the preferred delivery format.
+  if (record.deliveryBuffer?.length && record.deliveryMimeType === "video/mp4") {
+    return record;
+  }
+  if (record.sourceMimeType === "video/mp4" && record.originalBuffer.length > 1024) {
+    return record;
+  }
+
+  // Recreate the source file from the SQLite BLOB when the ephemeral filesystem
+  // no longer has the original WebM/Ogg file. This makes the video database the
+  // authoritative media store rather than the local filesystem.
+  let original = findOriginalVideoPath(videoId);
+  if (!original) {
+    const sourcePath = getVideoFilePath(videoId, record.originalExtension);
+    try {
+      fs.writeFileSync(sourcePath, record.originalBuffer);
+      original = {
+        path: sourcePath,
+        mimeType: record.sourceMimeType,
+        extension: record.originalExtension,
+      };
+    } catch (error) {
+      console.warn(`Could not recreate source media for ${videoId}:`, error);
+      return record;
+    }
+  }
+
+  const compatibleMp4 = await transcodeToCompatibleMp4(videoId, original.path);
+  if (!compatibleMp4 || !fs.existsSync(compatibleMp4)) {
+    console.warn(`Compatible MP4 is not available for ${videoId}; serving the original ${record.sourceMimeType} recording.`);
+    return record;
+  }
+
+  try {
+    const deliveryBuffer = fs.readFileSync(compatibleMp4);
+    if (deliveryBuffer.length <= 1024) return record;
+
+    saveVideoToDatabase({
+      id: record.id,
+      interviewId: record.interviewId,
+      questionId: record.questionId,
+      sourceMimeType: record.sourceMimeType,
+      sourceExtension: record.originalExtension,
+      originalBuffer: record.originalBuffer,
+      deliveryMimeType: "video/mp4",
+      deliveryBuffer,
+      durationSeconds: record.durationSeconds,
+      recordedAt: record.recordedAt,
+    });
+
+    record = getVideoDatabaseRecord(videoId) || record;
+  } catch (error) {
+    console.warn(`Could not persist compatible MP4 for ${videoId}:`, error);
+  }
+
+  return record;
+};
+
+const resolveStoredVideo = (videoId: string): { buffer: Buffer; mimeType: string } | null => {
   const dbRecord = getVideoDatabaseRecord(videoId);
   if (dbRecord) {
-    if (preferDelivery && dbRecord.deliveryBuffer?.length) return { buffer: dbRecord.deliveryBuffer, mimeType: dbRecord.deliveryMimeType };
     return { buffer: dbRecord.originalBuffer, mimeType: dbRecord.sourceMimeType };
   }
   const cached = videosStore.get(videoId);
@@ -1490,24 +1551,53 @@ app.get("/api/videos/:id", (req: Request, res: Response) => {
 
 // Always prefer an H.264/AAC MP4 for browser and OS/default-player compatibility.
 // Conversion is lazy and cached, so recordings are not blocked by AI transcription.
-app.get("/api/videos/:id/playback", (req: Request, res: Response) => {
-  const stored = resolveStoredVideo(req.params.id, true);
-  if (!stored) { res.status(404).json({ error: "Recorded video not found." }); return; }
-  streamBufferWithRanges(req, res, stored.buffer, stored.mimeType);
+app.get("/api/videos/:id/playback", async (req: Request, res: Response) => {
+  try {
+    // Prefer a broadly compatible H.264/AAC MP4. If conversion is still needed,
+    // wait for it on the first playback request and cache the result in SQLite.
+    const record = await ensureCompatibleVideoDelivery(req.params.id);
+    if (record) {
+      const buffer = record.deliveryBuffer?.length ? record.deliveryBuffer : record.originalBuffer;
+      const mime = record.deliveryBuffer?.length ? record.deliveryMimeType : record.sourceMimeType;
+      streamBufferWithRanges(req, res, buffer, mime);
+      return;
+    }
+
+    const stored = resolveStoredVideo(req.params.id);
+    if (!stored) { res.status(404).json({ error: "Recorded video not found." }); return; }
+    streamBufferWithRanges(req, res, stored.buffer, stored.mimeType);
+  } catch (error) {
+    console.error("Video playback failed:", error);
+    res.status(500).json({
+      code: "VIDEO_PLAYBACK_FAILED",
+      error: "The recorded video could not be prepared for playback.",
+      retryable: true,
+    });
+  }
 });
 
-app.get("/api/videos/:id/download", (req: Request, res: Response) => {
-  const record = getVideoDatabaseRecord(req.params.id);
-  if (record) {
-    const buffer = record.deliveryBuffer?.length ? record.deliveryBuffer : record.originalBuffer;
-    const mime = record.deliveryBuffer?.length ? record.deliveryMimeType : record.sourceMimeType;
-    const ext = mime.includes("mp4") ? "mp4" : mime.includes("ogg") ? "ogg" : "webm";
-    streamBufferWithRanges(req, res, buffer, mime, `reqvoice_recording_${req.params.id}.${ext}`);
-    return;
+app.get("/api/videos/:id/download", async (req: Request, res: Response) => {
+  try {
+    const record = await ensureCompatibleVideoDelivery(req.params.id);
+    if (record) {
+      const buffer = record.deliveryBuffer?.length ? record.deliveryBuffer : record.originalBuffer;
+      const mime = record.deliveryBuffer?.length ? record.deliveryMimeType : record.sourceMimeType;
+      const ext = mime.includes("mp4") ? "mp4" : mime.includes("ogg") ? "ogg" : "webm";
+      streamBufferWithRanges(req, res, buffer, mime, `reqvoice_recording_${req.params.id}.${ext}`);
+      return;
+    }
+
+    const original = findOriginalVideoPath(req.params.id);
+    if (!original) { res.status(404).json({ error: "Recorded video not found." }); return; }
+    streamFileWithRanges(req, res, original.path, original.mimeType, `reqvoice_recording_${req.params.id}.${original.extension}`);
+  } catch (error) {
+    console.error("Video download failed:", error);
+    res.status(500).json({
+      code: "VIDEO_DOWNLOAD_FAILED",
+      error: "The recorded video could not be prepared for download.",
+      retryable: true,
+    });
   }
-  const original = findOriginalVideoPath(req.params.id);
-  if (!original) { res.status(404).json({ error: "Recorded video not found." }); return; }
-  streamFileWithRanges(req, res, original.path, original.mimeType, `reqvoice_recording_${req.params.id}.${original.extension}`);
 });
 // 5. AI Video & Audio Transcription Endpoint using Gemini API
 app.post("/api/gemini/transcribe-video", async (req: Request, res: Response) => {
@@ -1552,7 +1642,7 @@ Analyze the spoken response and return a JSON object with:
       };
 
       const response = await ai.models.generateContent({
-        model: process.env.GEMINI_QUESTION_MODEL || "gemini-2.5-flash",
+        model: process.env.GEMINI_QUESTION_MODEL || "gemini-3.6-flash",
         contents,
         config: {
           responseMimeType: "application/json",
