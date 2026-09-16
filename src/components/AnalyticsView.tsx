@@ -14,6 +14,8 @@ interface AnalyticsViewProps {
 
 type InsightItem = {
   finding?: string;
+  question?: string;
+  summary?: string;
   theme?: string;
   name?: string;
   description?: string;
@@ -288,7 +290,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ interviews, system
 
           <section className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
             <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-3"><MessageSquare className="w-4 h-4 text-indigo-400" /> Question-by-Question Insights</h3>
-            <div className="space-y-3">{(aiData.questionInsights || []).map((x, i) => <InsightCard key={i} item={{ ...x, finding: x.questionInsights || x.finding, description: x.summary || x.description }} evidence={aiData.evidence} label={`Question ${i + 1}`} />)}</div>
+            <div className="space-y-3">{(aiData.questionInsights || []).map((x, i) => <InsightCard key={i} item={{ ...x, finding: x.question || x.finding, description: x.summary || x.description }} evidence={aiData.evidence} label={`Question ${i + 1}`} />)}</div>
           </section>
 
           {aiData.limitations?.length > 0 && <section className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5">
