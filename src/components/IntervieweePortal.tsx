@@ -132,6 +132,18 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
     setLiveTranscript('');
   }, [currentQIndex]);
 
+  // Attach the acquired stream after React has rendered the live <video>.
+  // Previously startCamera() assigned srcObject before cameraActive rendered the
+  // element, so liveVideoRef.current was null and the interviewee saw no camera.
+  useEffect(() => {
+    if (!cameraActive || !liveVideoRef.current || !mediaStreamRef.current) return;
+    const video = liveVideoRef.current;
+    video.srcObject = mediaStreamRef.current;
+    video.muted = true;
+    video.playsInline = true;
+    video.play().catch(() => {});
+  }, [cameraActive]);
+
   // Start camera and microphone
   const startCamera = async () => {
     setCameraError(null);
@@ -481,10 +493,9 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
       let finalTranscript = recordedBlob ? liveTranscript.trim() : '';
       let finalSentiment = recordedBlob ? sentimentResult : null;
 
-      if (recordedBlob && !finalTranscript) {
-        throw new Error('The recorded video could not be transcribed. The response will not be labeled as a transcript.');
-      }
-
+      // A recording is valid evidence even when transcription fails.
+      // Never invent a transcript. The original video must still be submitted
+      // and made available to the interviewer for playback.
       // 2. Save compressed video blob locally in IndexedDB if not already saved
       const videoId = currentSavedVideoIdRef.current || `vid-${currentQ.id}-${Date.now()}`;
       if (recordedBlob && !currentSavedVideoIdRef.current) {
@@ -1081,7 +1092,7 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
                   {isSubmitting ? (
                     <>
                       <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Transcribing & Saving...</span>
+                      <span>Saving Recording...</span>
                     </>
                   ) : (
                     <>
