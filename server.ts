@@ -1344,20 +1344,12 @@ app.post(
 
       if (detected.extension !== "mp4") {
         void transcodeToCompatibleMp4(videoId, originalPath).then((compatibleMp4) => {
-          if (!compatibleMp4 || !fs.existsSync(compatibleMp4)) return;
-          const candidate = fs.readFileSync(compatibleMp4);
-          if (candidate.length <= 1024) return;
+          if (!compatibleMp4 || !fs.existsSync(compatibleMp4) || fs.statSync(compatibleMp4).size <= 1024) return;
           saveVideoToDatabase({
-            id: videoId,
-            interviewId: interview.id,
-            questionId,
-            sourceMimeType: detected.mimeType,
-            sourceExtension: detected.extension,
-            originalBuffer: videoBuffer,
-            deliveryMimeType: "video/mp4",
-            deliveryBuffer: candidate,
-            durationSeconds,
-            recordedAt,
+            id: videoId, interviewId: interview.id, questionId,
+            sourceMimeType: detected.mimeType, sourceExtension: detected.extension,
+            originalBuffer: Buffer.alloc(0), deliveryMimeType: "video/mp4",
+            deliveryBuffer: null, storagePath: compatibleMp4, durationSeconds, recordedAt,
           });
         }).catch((error) => {
           console.warn("Background MP4 conversion failed; original recording remains available:", error);
