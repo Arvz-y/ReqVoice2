@@ -75,6 +75,9 @@ interface StoredInterview {
   status: "scheduled" | "in_progress" | "completed";
   interviewType?: "Structured" | "Semi-Structured" | "Unstructured";
   questions: StoredQuestion[];
+  prompt?: string;
+  promptVersion?: number;
+  promptChangeCount?: number;
   responses: Record<string, any>;
   summaryReport?: any;
   createdAt: string;
@@ -706,8 +709,8 @@ app.post("/api/interviews/:id/response", (req: Request, res: Response) => {
     } else {
       try {
         const cleanBase64 = videoRecording.base64Data.replace(/^data:[^;]+;base64,/, "");
-      const videoBuffer = Buffer.from(cleanBase64, "base64");
-      if (!videoBuffer.length) throw new Error("Empty video payload");
+        const videoBuffer = Buffer.from(cleanBase64, "base64");
+        if (!videoBuffer.length) throw new Error("Empty video payload");
       const mimeType = videoRecording.mimeType || "video/webm";
       const extension = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
       videosStore.set(videoRecording.id, {
