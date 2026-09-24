@@ -56,7 +56,17 @@ function localTagalog(source:string) {
     const escaped=from.replace(/[.*+?^$()|[\]\\]/g,'\\$&');
     value=value.replace(new RegExp(escaped,'gi'),to);
   }
-  return value.split(/(\s+|[^A-Za-z0-9À-ÿ'-]+)/).map(p=>tagalogWords[p.toLowerCase()]||p).join('');
+  const parts = value.split(/(\s+|[^A-Za-z0-9À-ÿ'-]+)/);
+  let translatedWords = 0;
+  const result = parts.map(p => {
+    const translated = tagalogWords[p.toLowerCase()];
+    if (translated) {
+      translatedWords++;
+      return translated;
+    }
+    return p;
+  }).join('');
+  return translatedWords > 0 ? result : value;
 }
 
 const cache = new Map<string, string>();
