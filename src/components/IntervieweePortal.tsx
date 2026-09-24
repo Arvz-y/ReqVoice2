@@ -100,7 +100,7 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
   // Load interview details
   useEffect(() => {
     loadInterview();
-    return (\n    <div className="relative">\n      <div className="absolute top-4 right-4 z-20"><LanguageSelector /></div>) => {
+    return () => {
       stopCamera();
     };
   }, [token]);
