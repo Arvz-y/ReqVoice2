@@ -46,3 +46,17 @@ patch('server.ts', (source) => {
   if (!source.includes(marker)) throw new Error('ReqVoice server patch marker not found');
   return source.replace(marker, route + marker);
 });
+
+patch(server, (source) => {
+  source = source.replace(
+    "  if (ai && mediaData) {\n    try {\n      // Prefer the server-side video database record",
+    "  if (ai && mediaData) {\n    let contents: any;\n    try {\n      // Prefer the server-side video database record"
+  );
+  source = source.replace("      const contents = {", "      contents = {");
+  source = source.replace("        mediaBuffer = remoteVideo.buffer;", "        mediaBuffer = remoteVideo.buffer as any;");
+  source = source.replace(
+    "  const modelErrors: string[] = [];",
+    "  const modelErrors: string[] = [];\n  const modelCandidates = [\"gemini-3.5-flash-lite\", \"gemini-3.8-flash\", \"gemini-3.7-flash\", \"gemini-3.6-flash\"];"
+  );
+  return source;
+});
