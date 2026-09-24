@@ -187,8 +187,11 @@ export const TranslationLayer: React.FC = () => {
       let n: Node | null;
       while ((n = walker.nextNode())) {
         const text = n as Text;
-        const source = originalText.get(text);
-        if (source && text.nodeValue !== source) text.nodeValue = source;
+        const meta = originalText.get(text);
+        if (meta) {
+          if (text.nodeValue !== meta.source) text.nodeValue = meta.source;
+          meta.lastTranslated = meta.source;
+        }
       }
 
       const elements = [root, ...Array.from(root.querySelectorAll('[title],[placeholder],[aria-label]'))];
