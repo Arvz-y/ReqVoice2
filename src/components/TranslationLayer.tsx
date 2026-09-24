@@ -158,7 +158,7 @@ async function translateNodes(nodes: Text[], target: string) {
     }
   }
 
-  items.forEach(({ node, source }) => {
+  items.forEach(({ node, source, meta }) => {
     if (!node.isConnected) return;
     const translated = cache.get(target + '|' + source);
     if (translated) {
