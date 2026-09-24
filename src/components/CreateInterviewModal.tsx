@@ -180,12 +180,12 @@ const INTERVIEW_TYPE_DETAILS: Record<
 };
 
 export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
-  const { language } = useLanguage();
   systems,
   isOpen,
   onClose,
   onSuccess,
 }) => {
+  const { language } = useLanguage();
   const [systemId, setSystemId] = useState(systems[0]?.id || '');
   const [customSystemName, setCustomSystemName] = useState('');
   const [intervieweeName, setIntervieweeName] = useState('');
