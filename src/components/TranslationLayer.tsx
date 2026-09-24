@@ -120,7 +120,7 @@ async function translateAttributes(targets: Array<{ el: Element; attr: string; s
 function shouldTranslate(node: Text) {
   const parent = node.parentElement;
   if (!parent || !node.nodeValue?.trim()) return false;
-  if (parent.closest('[data-language-ui],[data-no-translate],input,textarea,select,script,style,code,pre,[contenteditable="true"]')) return false;
+  if (parent.closest('[data-language-ui],[data-no-translate],input,textarea,script,style,code,pre,[contenteditable="true"]')) return false;
   const value = node.nodeValue.trim();
   return value.length >= 2 && !/^[\d\W_]+$/.test(value);
 }
@@ -128,9 +128,15 @@ function shouldTranslate(node: Text) {
 async function translateNodes(nodes: Text[], target: string) {
   const items = nodes.map(node => {
     const current = node.nodeValue?.trim() || '';
-    const source = originalText.get(node) || current;
-    if (!originalText.has(node)) originalText.set(node, source);
-    return { node, source };
+    let meta = originalText.get(node);
+    if (!meta) {
+      meta = { source: current, lastTranslated: current };
+      originalText.set(node, meta);
+    } else if (current !== meta.lastTranslated && current !== meta.source) {
+      meta.source = current;
+      meta.lastTranslated = current;
+    }
+    return { node, source: meta.source, meta };
   }).filter(x => x.source.length >= 2);
 
   const unique = [...new Set(items.map(x => x.source))];
@@ -155,7 +161,10 @@ async function translateNodes(nodes: Text[], target: string) {
   items.forEach(({ node, source }) => {
     if (!node.isConnected) return;
     const translated = cache.get(target + '|' + source);
-    if (translated) node.nodeValue = translated;
+    if (translated) {
+      node.nodeValue = translated;
+      meta.lastTranslated = translated;
+    }
   });
 }
 
