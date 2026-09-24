@@ -121,7 +121,17 @@ export const TranslationLayer: React.FC = () => {
     if (!root) return;
 
     let timer: number | undefined;
+    const restoreAttributes = () => {
+      const elements = [root, ...Array.from(root.querySelectorAll('[title],[placeholder],[aria-label]'))];
+      for (const el of elements) {
+        const saved = originalAttrs.get(el);
+        if (!saved) continue;
+        Object.entries(saved).forEach(([attr, value]) => el.setAttribute(attr, value));
+      }
+    };
+
     const restoreAndCollect = () => {
+      restoreAttributes();
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       const nodes: Text[] = [];
       let n: Node | null;
