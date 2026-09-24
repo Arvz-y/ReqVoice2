@@ -105,8 +105,9 @@ export const TranslationLayer: React.FC = () => {
 
     run();
     const observer = new MutationObserver(run);
-    observer.observe(root, { childList: true, subtree: true, characterData: true });
-    return () => { observer.disconnect(); window.clearTimeout(timer); };
+    observer.observe(root, { childList: true, subtree: true });
+    const interval = window.setInterval(run, 1200);
+    return () => { observer.disconnect(); window.clearTimeout(timer); window.clearInterval(interval); };
   }, [language.code, language.name]);
 
   return null;
