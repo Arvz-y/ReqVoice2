@@ -22,6 +22,7 @@ async function get<T>(key:string):Promise<T|null>{ try{const db=await getDB();re
 export function isOnline(){ return typeof navigator==='undefined' ? true : navigator.onLine; }
 export function makeOfflineId(prefix:string){ const random=typeof crypto!=='undefined'&&'randomUUID' in crypto?crypto.randomUUID():Math.random().toString(36).slice(2)+Date.now().toString(36); return 'offline-'+prefix+'-'+random; }
 export async function cacheUser(user:UserProfile|null){if(user) await put('user',user);}
+export async function clearCachedUser(){await put('user',null);}
 export function getCachedUser(){return get<UserProfile>('user');}
 export async function cacheSystems(systems:SystemUnderStudy[]){await put('systems',systems);}
 export function getCachedSystems(){return get<SystemUnderStudy[]>('systems').then(v=>v||[]);}
