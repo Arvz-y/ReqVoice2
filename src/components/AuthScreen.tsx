@@ -3,6 +3,7 @@ import { Lock, Mail, User, Shield, ArrowRight, Eye, EyeOff, CheckCircle2, Sparkl
 import { api } from '../lib/api';
 import { UserProfile } from '../types';
 import { useTheme } from './ThemeContext';
+import { LanguageSelector } from './LanguageSelector';
 
 interface AuthScreenProps {
   onLoginSuccess: (user: UserProfile) => void;
@@ -68,7 +69,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[350px] bg-indigo-600/10 blur-[130px] rounded-full pointer-events-none" />
       <div className="absolute bottom-10 right-10 w-[300px] h-[300px] bg-emerald-600/10 blur-[100px] rounded-full pointer-events-none" />
 
-      <div className="absolute top-5 right-5 z-20">
+      <div className="absolute top-5 right-5 z-20 flex items-center gap-2"><LanguageSelector />
         <button
           id="btn-auth-theme-toggle"
           type="button"
