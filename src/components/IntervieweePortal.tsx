@@ -785,7 +785,8 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8 font-sans relative">\n      <div className="absolute top-4 right-4 z-20"><LanguageSelector /></div>
+    <div className="min-h-screen bg-slate-950 text-slate-100 py-8 px-4 sm:px-6 lg:px-8 font-sans relative">
+      <div className="absolute top-4 right-4 z-20"><LanguageSelector /></div>
       <div className="max-w-2xl mx-auto space-y-5">
 
         {/* Top Preview Bar if launched from workspace */}
