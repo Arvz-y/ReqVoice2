@@ -2804,7 +2804,7 @@ app.post("/api/gemini/suggest-questions", async (req: Request, res: Response) =>
   const requestedPrompt = typeof customPrompt === "string" ? customPrompt.trim() : "";
   const revision = Math.max(1, Number(promptVersion) || 1);
   const ai = getGeminiClient();
-  const numQuestions = Math.min(10, Math.max(1, Number(count) || 5));
+  const numQuestions = Math.min(50, Math.max(1, Number(count) || 5));
 
   if (!requestedPrompt) {
     res.status(400).json({ error: "An interview prompt is required before generating questions.", promptVersion: revision });
@@ -2852,7 +2852,7 @@ ${typeGuidance}
 Generate exactly ${numQuestions} NEW, SPECIFIC, INTERVIEW-READY questions based primarily on the latest interviewer prompt.
 PROMPT REVISION: ${revision}
 LATEST INTERVIEWER PROMPT: "${requestedPrompt}"
-LANGUAGE REQUIREMENT: Write questionText, rationale, and every suggestedFollowups item entirely in ${language}. Do not mix languages unless a proper product/system name or technical term must remain unchanged.
+LANGUAGE REQUIREMENT: Write questionText, rationale, and every suggestedFollowups item entirely in ${language}. If the selected language is Tagalog, use natural Filipino/Tagalog grammar and vocabulary, not English sentences with a few translated words. Do not mix languages unless a proper product/system name or technical term must remain unchanged.
 IMPORTANT: Do not use generic category questions as the main content. Each question must directly address the user prompt and be answerable by the selected interviewee. If the prompt says "deletion of wrong process", ask specifically about identifying, correcting, reversing, deleting, authorizing, validating, auditing, and preventing incorrect processes as appropriate to the system. Do not merely repeat the prompt verbatim.
 Target system: "${systemName || "Enterprise System"}" (${systemType || "Enterprise Platform"}).
 Target role: "${role || "Stakeholder"}".
@@ -2887,7 +2887,7 @@ Format as JSON array of objects:
         const generation = await generateWithAvailableGeminiModel(
           ai,
           process.env.GEMINI_QUESTION_MODEL?.trim(),
-          { contents: systemInstruction },
+          { contents: systemInstruction, config: { responseMimeType: "application/json", maxOutputTokens: 32768 } },
           ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
         );
         response = generation.response;
@@ -2983,7 +2983,7 @@ ${JSON.stringify(texts)}`;
     const generation = await generateWithAvailableGeminiModel(
       ai,
       process.env.GEMINI_TRANSLATION_MODEL?.trim(),
-      { contents: prompt },
+      { contents: prompt, config: { responseMimeType: "application/json", maxOutputTokens: 8192 } },
       ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
     );
     const raw = String(generation.response?.text || "").trim();
