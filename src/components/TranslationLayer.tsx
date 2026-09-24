@@ -28,6 +28,48 @@ const tagalog: Record<string, string> = {
 
 const cache = new Map<string, string>();
 const originalText = new WeakMap<Text, string>();
+const originalAttrs = new WeakMap<Element, Record<string, string>>();
+
+function collectAttributeTargets(root: HTMLElement) {
+  const targets: Array<{ el: Element; attr: string; source: string }> = [];
+  const elements = [root, ...Array.from(root.querySelectorAll('[title],[placeholder],[aria-label]'))];
+  for (const el of elements) {
+    if (el.closest('[data-language-ui],[data-no-translate]')) continue;
+    for (const attr of ['title', 'placeholder', 'aria-label']) {
+      const value = el.getAttribute(attr);
+      if (!value || value.length < 2) continue;
+      const saved = originalAttrs.get(el) || {};
+      if (!saved[attr]) saved[attr] = value;
+      originalAttrs.set(el, saved);
+      targets.push({ el, attr, source: saved[attr] });
+    }
+  }
+  return targets;
+}
+
+async function translateAttributes(targets: Array<{ el: Element; attr: string; source: string }>, target: string) {
+  const unique = [...new Set(targets.map(x => x.source))];
+  const unresolved = unique.filter(source => !cache.has(target + '|' + source));
+  for (const source of unresolved) {
+    const known = target.toLowerCase().startsWith('tagalog') || target.toLowerCase().startsWith('tl') ? tagalog[source] : undefined;
+    if (known) cache.set(target + '|' + source, known);
+  }
+  const pending = unresolved.filter(source => !cache.has(target + '|' + source));
+  if (pending.length) {
+    try {
+      const result = await api.i18n.translate({ texts: pending, targetLanguage: target });
+      result.translations.forEach((value, i) => cache.set(target + '|' + pending[i], value || pending[i]));
+    } catch {
+      pending.forEach(source => cache.set(target + '|' + source, source));
+    }
+  }
+  targets.forEach(({ el, attr, source }) => {
+    if (el.isConnected) {
+      const translated = cache.get(target + '|' + source);
+      if (translated) el.setAttribute(attr, translated);
+    }
+  });
+}
 
 function shouldTranslate(node: Text) {
   const parent = node.parentElement;
@@ -96,9 +138,13 @@ export const TranslationLayer: React.FC = () => {
       window.clearTimeout(timer);
       timer = window.setTimeout(async () => {
         const nodes = restoreAndCollect();
+        const attrs = collectAttributeTargets(root);
         if (language.code === 'en') return;
         for (let i = 0; i < nodes.length; i += 40) {
           await translateNodes(nodes.slice(i, i + 40), language.name);
+        }
+        for (let i = 0; i < attrs.length; i += 40) {
+          await translateAttributes(attrs.slice(i, i + 40), language.name);
         }
       }, 80);
     };
