@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { SystemUnderStudy, InterviewQuestion, InterviewType } from '../types';
 import { api } from '../lib/api';
+import { useLanguage } from './LanguageContext';
 
 interface SystemsViewProps {
   systems: SystemUnderStudy[];
@@ -23,6 +24,7 @@ export const SystemsView: React.FC<SystemsViewProps> = ({
   onRefreshSystems,
   onLaunchInterviewForSystem,
 }) => {
+  const { language } = useLanguage();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedSystem, setSelectedSystem] = useState<SystemUnderStudy | null>(systems[0] || null);
   const [systemToDelete, setSystemToDelete] = useState<SystemUnderStudy | null>(null);
@@ -98,6 +100,7 @@ export const SystemsView: React.FC<SystemsViewProps> = ({
         systemType: selectedSystem.type,
         role: selectedSystem.targetRoles[0] || 'Stakeholder',
         interviewType: interviewType,
+        language: language.name,
       });
       setSuggestedQuestions(res.questions);
     } catch (err: any) {
