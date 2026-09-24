@@ -2977,19 +2977,19 @@ app.post("/api/i18n/translate", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const prompt = `You are a professional Filipino language translator for a software application.
-Translate each item from ${sourceLanguage} to ${targetLanguage}.
+    const isFilipino = /^(tagalog|filipino|tl)([-_].*)?$/i.test(targetLanguage);
+    const prompt = `You are a professional software UI translator.
+Translate EVERY input item completely from ${sourceLanguage} to ${targetLanguage}.
+Return ONLY a JSON array containing exactly ${texts.length} translated strings in the same order.
 
-LANGUAGE QUALITY RULES:
-- When the target language is Tagalog or Filipino, use proper, natural, grammatically correct Filipino/Tagalog.
-- NEVER use Taglish, conyo, or Filipino sentences mixed with unnecessary English words.
-- Translate ordinary interface text, buttons, labels, instructions, questions, explanations, chatbot messages, system descriptions, analytics findings, summaries, and generated interview content fully into Filipino.
-- Use established Filipino equivalents when they are natural and understandable.
-- English may remain only for proper names, product/model names, URLs, acronyms, programming identifiers, standards, and genuinely technical terms that have no clear natural Filipino equivalent.
-- Do not merely replace a few English words; translate the complete meaning and sentence naturally.
-- Preserve names, product names, model names, numbers, URLs, acronyms, standards, and technical identifiers when appropriate.
-- Return ONLY a JSON array of strings in the exact same order and count.
-- Do not summarize, shorten, omit, or add anything.
+Rules:
+- Never omit, summarize, shorten, or return an untranslated item.
+- Translate labels, buttons, questions, explanations, analytics, summaries, chatbot messages, system descriptions, and generated interview content completely.
+- Preserve proper names, product/model names, URLs, acronyms, standards, code identifiers, numbers, and exact technical identifiers.
+- If the target is Tagalog/Filipino, use natural, grammatically correct Filipino. Never use Taglish, conyo phrasing, or English sentence structure with a few Filipino words.
+- Use established Filipino equivalents for ordinary words. Keep only genuinely technical terms that have no clear natural Filipino equivalent.
+- Preserve the original meaning and punctuation.
+${isFilipino ? 'For Filipino: translate ordinary interface words such as Questions, Systems, Reports, Analytics, Requirements, Response, Summary, Findings, Settings, Generate, Save, Cancel, Search, Loading, Error, and Success into Filipino.' : ''}
 
 INPUT:
 ${JSON.stringify(texts)}`;
