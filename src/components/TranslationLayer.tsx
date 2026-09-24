@@ -156,49 +156,113 @@ export const TranslationLayer: React.FC = () => {
     if (!root) return;
 
     let timer: number | undefined;
-    const restoreAttributes = () => {
+    let running = false;
+    let rerun = false;
+    let observer: MutationObserver | null = null;
+    let generation = 0;
+
+    const restoreOriginals = () => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let n: Node | null;
+      while ((n = walker.nextNode())) {
+        const text = n as Text;
+        const source = originalText.get(text);
+        if (source && text.nodeValue !== source) text.nodeValue = source;
+      }
+
       const elements = [root, ...Array.from(root.querySelectorAll('[title],[placeholder],[aria-label]'))];
       for (const el of elements) {
         const saved = originalAttrs.get(el);
         if (!saved) continue;
-        Object.entries(saved).forEach(([attr, value]) => el.setAttribute(attr, value));
+        Object.entries(saved).forEach(([attr, value]) => {
+          if (el.getAttribute(attr) !== value) el.setAttribute(attr, value);
+        });
       }
     };
 
-    const restoreAndCollect = () => {
-      restoreAttributes();
+    const collectTextNodes = () => {
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       const nodes: Text[] = [];
       let n: Node | null;
       while ((n = walker.nextNode())) {
         const text = n as Text;
-        const source = originalText.get(text);
-        if (source) text.nodeValue = source;
-        if (shouldTranslate(text)) nodes.push(text);
+        if (shouldTranslate(text)) {
+          const current = text.nodeValue?.trim() || '';
+          if (!originalText.has(text)) originalText.set(text, current);
+          nodes.push(text);
+        }
       }
       return nodes;
     };
 
-    const run = () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(async () => {
-        const nodes = restoreAndCollect();
+    const run = async () => {
+      if (running) {
+        rerun = true;
+        return;
+      }
+      running = true;
+      rerun = false;
+      const myGeneration = ++generation;
+
+      if (observer) observer.disconnect();
+
+      try {
+        // React owns the DOM. Restore English only when the selected language
+        // actually changes; never restore on every MutationObserver callback.
+        // Otherwise our own translations trigger the observer and fight React.
+        if (language.code === 'en') {
+          restoreOriginals();
+          return;
+        }
+
+        const nodes = collectTextNodes();
         const attrs = collectAttributeTargets(root);
-        if (language.code === 'en') return;
+
         for (let i = 0; i < nodes.length; i += 40) {
+          if (myGeneration !== generation) return;
           await translateNodes(nodes.slice(i, i + 40), language.name);
         }
+
         for (let i = 0; i < attrs.length; i += 40) {
+          if (myGeneration !== generation) return;
           await translateAttributes(attrs.slice(i, i + 40), language.name);
         }
-      }, 80);
+      } finally {
+        running = false;
+        if (myGeneration === generation) {
+          observer?.observe(root, { childList: true, subtree: true, characterData: true });
+        }
+        if (rerun && myGeneration === generation) {
+          window.clearTimeout(timer);
+          timer = window.setTimeout(() => { void run(); }, 120);
+        }
+      }
     };
 
-    run();
-    const observer = new MutationObserver(run);
-    observer.observe(root, { childList: true, subtree: true });
-    const interval = window.setInterval(run, 1200);
-    return () => { observer.disconnect(); window.clearTimeout(timer); window.clearInterval(interval); };
+    const schedule = () => {
+      if (running) {
+        rerun = true;
+        return;
+      }
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { void run(); }, 80);
+    };
+
+    observer = new MutationObserver(() => {
+      // Only react to changes made by React/application code. The observer is
+      // disconnected while this translation layer mutates text/attributes.
+      schedule();
+    });
+    observer.observe(root, { childList: true, subtree: true, characterData: true });
+
+    void run();
+
+    return () => {
+      generation++;
+      observer?.disconnect();
+      observer = null;
+      window.clearTimeout(timer);
+    };
   }, [language.code, language.name]);
 
   return null;
