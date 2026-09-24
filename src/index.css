@@ -97,6 +97,99 @@ html.light textarea::placeholder {
   color: #94a3b8 !important;
 }
 
+
+/* Theme-specific application chrome.
+   Keep the light theme genuinely light and use the same thin, subtle separators
+   as the reference dark UI instead of high-contrast white lines. */
+html.light #app-sidebar {
+  background-color: #ffffff !important;
+  border-right-color: #e2e8f0 !important;
+  box-shadow: 8px 0 24px rgba(15, 23, 42, 0.04) !important;
+}
+
+html.light #app-sidebar .border-b,
+html.light #app-sidebar .border-t,
+html.light #app-sidebar .border-r {
+  border-color: #e2e8f0 !important;
+}
+
+html.light #app-sidebar .bg-slate-950,
+html.light #app-sidebar .bg-slate-950\/95,
+html.light #app-sidebar .bg-slate-950\/70 {
+  background-color: #ffffff !important;
+}
+
+html.light #app-sidebar .bg-slate-900,
+html.light #app-sidebar .bg-slate-900\/90,
+html.light #app-sidebar .bg-slate-900\/80,
+html.light #app-sidebar .bg-slate-900\/60 {
+  background-color: #f8fafc !important;
+  box-shadow: none !important;
+}
+
+html.light #app-sidebar .bg-slate-800 {
+  background-color: #f1f5f9 !important;
+}
+
+html.light #app-sidebar .text-white {
+  color: #0f172a !important;
+}
+
+html.light #app-sidebar .text-slate-100,
+html.light #app-sidebar .text-slate-200 {
+  color: #334155 !important;
+}
+
+html.light #app-sidebar .text-slate-300 {
+  color: #475569 !important;
+}
+
+html.light #app-sidebar .text-slate-400,
+html.light #app-sidebar .text-slate-500 {
+  color: #64748b !important;
+}
+
+html.light #app-sidebar .text-slate-400:hover,
+html.light #app-sidebar .text-slate-300:hover {
+  color: #334155 !important;
+}
+
+html.light #app-sidebar .hover\:bg-slate-900\/80:hover,
+html.light #app-sidebar .hover\:bg-slate-900:hover,
+html.light #app-sidebar .hover\:bg-slate-800:hover {
+  background-color: #f1f5f9 !important;
+}
+
+html.light #app-sidebar .border-slate-800,
+html.light #app-sidebar .border-slate-800\/80,
+html.light #app-sidebar .border-slate-800\/90 {
+  border-color: #e2e8f0 !important;
+}
+
+html.light #app-sidebar .border-slate-700 {
+  border-color: #cbd5e1 !important;
+}
+
+/* Keep active navigation visually identical in both themes. */
+html.light #app-sidebar .bg-indigo-600 {
+  background-color: #4f46e5 !important;
+  color: #ffffff !important;
+}
+
+html.light #app-sidebar .bg-indigo-700 {
+  background-color: #4338ca !important;
+}
+
+html.light #app-sidebar .text-indigo-100 {
+  color: #e0e7ff !important;
+}
+
+/* Reference-style thin separators in the main application shell. */
+html.light #app-sidebar + * .border-b,
+html.light #app-sidebar + * .border-t {
+  border-color: #e2e8f0 !important;
+}
+
 /* Custom smooth scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
