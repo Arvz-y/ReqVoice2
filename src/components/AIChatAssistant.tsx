@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { SystemUnderStudy } from '../types';
+import { useLanguage } from './LanguageContext';
 
 export interface ChatModel {
   id: string;
@@ -48,6 +49,7 @@ export const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
   isFloating = false,
   onClose,
 }) => {
+  const { language } = useLanguage();
   const [models, setModels] = useState<ChatModel[]>([
     {
       id: 'gemini-2.5-flash',
@@ -156,6 +158,7 @@ export const AIChatAssistant: React.FC<AIChatAssistantProps> = ({
         model: selectedModelId,
         history: historyPayload,
         systemContextId: selectedSystemContextId === 'all' ? undefined : selectedSystemContextId,
+        language: language.name,
       });
 
       const assistantMsg: ChatMessage = {
