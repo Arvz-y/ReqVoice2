@@ -103,14 +103,12 @@ export const TopBar: React.FC<TopBarProps> = ({
 
       {/* Right: Actions & User Avatar */}
       <div className="flex items-center space-x-2 shrink-0">
-        {/* Compact PWA Mobile Install Button */}
         <div className="hidden sm:block">
           <MobileInstallBanner compact={true} />
         </div>
 
         <LanguageSelector />
 
-        {/* Quick Light / Dark Mode Toggle Button */
         <button
           id="btn-quick-theme-toggle"
           onClick={toggleTheme}
@@ -131,7 +129,6 @@ export const TopBar: React.FC<TopBarProps> = ({
           )}
         </button>
 
-        {/* Tutorial Link */}
         <button
           onClick={onOpenTutorial}
           className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-indigo-400 border border-slate-800 transition-colors cursor-pointer hidden sm:flex items-center"
@@ -140,7 +137,6 @@ export const TopBar: React.FC<TopBarProps> = ({
           <HelpCircle className="w-4 h-4" />
         </button>
 
-        {/* User Avatar & Profile */}
         <button
           onClick={onOpenProfile}
           className="flex items-center space-x-2 p-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-colors cursor-pointer"
