@@ -199,7 +199,7 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
 
   // AI Prompt Builder State
   const [aiPrompt, setAiPrompt] = useState(INTERVIEW_TYPE_DETAILS['Semi-Structured'].defaultPrompt);
-  const [questionCount, setQuestionCount] = useState(5);
+  const [questionCount, setQuestionCount] = useState(10);
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [promptVersion, setPromptVersion] = useState(1);
   const [lastGeneratedPrompt, setLastGeneratedPrompt] = useState('');
@@ -685,7 +685,7 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
                       onChange={(e) => setQuestionCount(Number(e.target.value))}
                       className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none"
                     >
-                      {[3, 4, 5, 6, 8].map((n) => (
+                      {[3, 4, 5, 6, 8, 10, 15, 20, 25, 30, 40, 50].map((n) => (
                         <option key={n} value={n}>
                           {n} Questions
                         </option>
