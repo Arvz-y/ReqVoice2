@@ -2800,7 +2800,7 @@ app.post("/api/gemini/suggest-questions", async (req: Request, res: Response) =>
     promptVersion: req.body?.promptVersion,
     count: req.body?.count,
   });
-  const { systemName, systemType, role, prompt: customPrompt, promptVersion, count, interviewType: rawInterviewType } = req.body;
+  const { systemName, systemType, role, prompt: customPrompt, promptVersion, count, interviewType: rawInterviewType, language = 'English' } = req.body;
   const requestedPrompt = typeof customPrompt === "string" ? customPrompt.trim() : "";
   const revision = Math.max(1, Number(promptVersion) || 1);
   const ai = getGeminiClient();
@@ -2852,6 +2852,7 @@ ${typeGuidance}
 Generate exactly ${numQuestions} NEW, SPECIFIC, INTERVIEW-READY questions based primarily on the latest interviewer prompt.
 PROMPT REVISION: ${revision}
 LATEST INTERVIEWER PROMPT: "${requestedPrompt}"
+LANGUAGE REQUIREMENT: Write questionText, rationale, and every suggestedFollowups item entirely in ${language}. Do not mix languages unless a proper product/system name or technical term must remain unchanged.
 IMPORTANT: Do not use generic category questions as the main content. Each question must directly address the user prompt and be answerable by the selected interviewee. If the prompt says "deletion of wrong process", ask specifically about identifying, correcting, reversing, deleting, authorizing, validating, auditing, and preventing incorrect processes as appropriate to the system. Do not merely repeat the prompt verbatim.
 Target system: "${systemName || "Enterprise System"}" (${systemType || "Enterprise Platform"}).
 Target role: "${role || "Stakeholder"}".
@@ -2869,6 +2870,7 @@ Format as JSON array of objects:
 ${typeGuidance}
 
 Generate ${numQuestions} targeted, high-impact interview questions for the role "${role || "Stakeholder"}" on the system "${systemName || "Enterprise System"}" (${systemType || "Business Application"}).
+LANGUAGE REQUIREMENT: Write questionText, rationale, and every suggestedFollowups item entirely in ${language}. Do not mix languages unless a proper product/system name or technical term must remain unchanged.
 Cover requirements categories: workflow, pain_point, expectation, limitation, desired_feature.
 Format as JSON array of objects:
 [
@@ -2954,6 +2956,45 @@ Format as JSON array of objects:
     promptVersion: revision,
   });
   return;
+});
+
+// Language translation service used by the UI translation layer and dynamic AI-generated content.
+app.post("/api/i18n/translate", async (req: Request, res: Response) => {
+  const texts = Array.isArray(req.body?.texts) ? req.body.texts.map((x: any) => String(x || "")).filter(Boolean).slice(0, 80) : [];
+  const targetLanguage = String(req.body?.targetLanguage || "English").trim();
+  const sourceLanguage = String(req.body?.sourceLanguage || "English").trim();
+  if (!texts.length || !targetLanguage) {
+    res.status(400).json({ error: "Translation requires at least one text item and a target language." });
+    return;
+  }
+  if (/^english$/i.test(targetLanguage) || /^en$/i.test(targetLanguage)) {
+    res.json({ translations: texts });
+    return;
+  }
+  const ai = getGeminiClient();
+  if (!ai) {
+    res.status(503).json({ error: "Translation AI is not configured.", translations: texts });
+    return;
+  }
+  try {
+    const prompt = `Translate each item from ${sourceLanguage} to ${targetLanguage}. Preserve names, product names, model names, numbers, URLs, acronyms, and technical identifiers. Return ONLY a JSON array of strings in the exact same order and count. Do not summarize or omit anything.
+INPUT:
+${JSON.stringify(texts)}`;
+    const generation = await generateWithAvailableGeminiModel(
+      ai,
+      process.env.GEMINI_TRANSLATION_MODEL?.trim(),
+      { contents: prompt },
+      ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"]
+    );
+    const raw = String(generation.response?.text || "").trim();
+    const match = raw.match(/\[[\s\S]*\]/);
+    const translations = match ? JSON.parse(match[0]) : null;
+    if (!Array.isArray(translations) || translations.length !== texts.length) throw new Error("Translation model returned an invalid array.");
+    res.json({ translations: translations.map((x: any, i: number) => String(x ?? texts[i])) });
+  } catch (err: any) {
+    console.warn("[I18N] translation failed:", err?.message || err);
+    res.status(503).json({ error: "Translation failed. Original text was preserved.", translations: texts });
+  }
 });
 
 // 6.5 User Activity Feed (Account-Isolated)
