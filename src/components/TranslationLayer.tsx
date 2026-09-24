@@ -26,6 +26,36 @@ const tagalog: Record<string, string> = {
   'Search':'Maghanap','Loading...':'Naglo-load...','Error':'Error','Success':'Tagumpay','Submit':'Isumite',
 };
 
+const tagalogWords: Record<string,string> = {
+  change:'baguhin',language:'wika',overview:'pangkalahatang-ideya',systems:'mga sistema',system:'sistema',
+  guides:'mga gabay',guide:'gabay',interview:'panayam',interviews:'mga panayam',reports:'mga ulat',report:'ulat',
+  active:'aktibo',ready:'handa',refresh:'i-refresh',previous:'nakaraan',next:'susunod',share:'ibahagi',copy:'kopyahin',
+  copied:'nakopya',completed:'nakumpleto',question:'tanong',questions:'mga tanong',answer:'sagot',response:'sagot',
+  received:'natanggap',awaiting:'naghihintay',complete:'kumpletuhin',session:'session',requirements:'mga requirement',
+  requirement:'requirement',role:'tungkulin',department:'kagawaran',name:'pangalan',create:'gumawa',access:'i-access',
+  your:'iyong',security:'seguridad',protected:'protektado',required:'kinakailangan',generate:'bumuo',cancel:'kanselahin',
+  save:'i-save',delete:'tanggalin',edit:'i-edit',search:'maghanap',loading:'naglo-load',error:'error',success:'tagumpay',
+  submit:'isumite',prompt:'tagubilin',instructions:'mga tagubilin',count:'bilang',manual:'mano-mano',template:'template',
+  reset:'i-reset',add:'magdagdag',remove:'alisin',select:'piliin',choose:'pumili',current:'kasalukuyan',optional:'opsyonal',
+  close:'isara',open:'buksan',clear:'linisin',history:'kasaysayan'
+};
+function localTagalog(source:string) {
+  const exact=tagalog[source]||tagalog[source.trim()];
+  if(exact) return exact;
+  const phrases:Array<[string,string]>=[
+    ['Change language','Baguhin ang wika'],['AI Generate','Bumuo gamit ang AI'],['Generate Questions','Bumuo ng mga Tanong'],
+    ['Generating Questions...','Bumubuo ng mga Tanong...'],['Questionnaire Construction','Pagbuo ng Talatanungan'],
+    ['Questions Count','Bilang ng mga Tanong'],['Prompt the AI','Bigyan ng Prompt ang AI'],['Create Manually','Gumawa nang Mano-mano'],
+    ['Prompt Instructions for AI','Mga Tagubilin para sa AI'],['Reset prompt','I-reset ang prompt'],['Type of Interview','Uri ng Panayam'],
+    ['Interview Type','Uri ng Panayam'],['Add Question Manually','Magdagdag ng Tanong nang Mano-mano'],
+    ['Question Text','Teksto ng Tanong'],['Rationale / Focus','Dahilan / Pokus'],['System Under Study','Sistema na Sinusuri'],
+    ['No active interview session selected.','Walang napiling aktibong interview session.'],['Sign Out','Mag-sign Out']
+  ];
+  let value=source;
+  for(const [from,to] of phrases) value=value.replace(new RegExp(from.replace(/[.*+?^$()|[\\]\\\\]/g,'\\\\const cache = new Map<string, string>();'),'gi'),to);
+  return value.split(/(\\s+|[^A-Za-z0-9À-ÿ'-]+)/).map(p=>tagalogWords[p.toLowerCase()]||p).join('');
+}
+
 const cache = new Map<string, string>();
 const originalText = new WeakMap<Text, string>();
 const originalAttrs = new WeakMap<Element, Record<string, string>>();
@@ -51,16 +81,17 @@ async function translateAttributes(targets: Array<{ el: Element; attr: string; s
   const unique = [...new Set(targets.map(x => x.source))];
   const unresolved = unique.filter(source => !cache.has(target + '|' + source));
   for (const source of unresolved) {
-    const known = target.toLowerCase().startsWith('tagalog') || target.toLowerCase().startsWith('tl') ? tagalog[source] : undefined;
+    const isTl = target.toLowerCase().startsWith('tagalog') || target.toLowerCase().startsWith('tl');
+    const known = isTl ? localTagalog(source) : undefined;
     if (known) cache.set(target + '|' + source, known);
   }
   const pending = unresolved.filter(source => !cache.has(target + '|' + source));
   if (pending.length) {
     try {
       const result = await api.i18n.translate({ texts: pending, targetLanguage: target });
-      result.translations.forEach((value, i) => cache.set(target + '|' + pending[i], value || pending[i]));
+      result.translations.forEach((value, i) => { const source = pending[i]; const translated = String(value || '').trim(); const isTl = target.toLowerCase().startsWith('tagalog') || target.toLowerCase().startsWith('tl'); cache.set(target + '|' + source, isTl && (!translated || translated.toLowerCase() === source.toLowerCase()) ? localTagalog(source) : (translated || source)); });
     } catch {
-      pending.forEach(source => cache.set(target + '|' + source, source));
+      pending.forEach(source => cache.set(target + '|' + source, target.toLowerCase().startsWith('tagalog') || target.toLowerCase().startsWith('tl') ? localTagalog(source) : source));
     }
   }
   targets.forEach(({ el, attr, source }) => {
@@ -91,7 +122,8 @@ async function translateNodes(nodes: Text[], target: string) {
   const unresolved = unique.filter(source => !cache.has(target + '|' + source));
 
   for (const source of unresolved) {
-    const known = target.toLowerCase().startsWith('tagalog') || target.toLowerCase().startsWith('tl') ? tagalog[source] : undefined;
+    const isTl = target.toLowerCase().startsWith('tagalog') || target.toLowerCase().startsWith('tl');
+    const known = isTl ? localTagalog(source) : undefined;
     if (known) cache.set(target + '|' + source, known);
   }
 
@@ -99,9 +131,9 @@ async function translateNodes(nodes: Text[], target: string) {
   if (pending.length) {
     try {
       const result = await api.i18n.translate({ texts: pending, targetLanguage: target });
-      result.translations.forEach((value, i) => cache.set(target + '|' + pending[i], value || pending[i]));
+      result.translations.forEach((value, i) => { const source = pending[i]; const translated = String(value || '').trim(); const isTl = target.toLowerCase().startsWith('tagalog') || target.toLowerCase().startsWith('tl'); cache.set(target + '|' + source, isTl && (!translated || translated.toLowerCase() === source.toLowerCase()) ? localTagalog(source) : (translated || source)); });
     } catch {
-      pending.forEach(source => cache.set(target + '|' + source, source));
+      pending.forEach(source => cache.set(target + '|' + source, target.toLowerCase().startsWith('tagalog') || target.toLowerCase().startsWith('tl') ? localTagalog(source) : source));
     }
   }
 
