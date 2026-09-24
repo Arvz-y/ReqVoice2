@@ -57,7 +57,10 @@ patch('server.ts', (source) => {
   if (!source.includes("const modelCandidates =")) {
     source = source.replace(
       "  const modelErrors: string[] = [];",
-      "  const modelErrors: string[] = [];\\n  const modelCandidates = [\\\"gemini-3.5-flash-lite\\\", \\"gemini-3.8-flash\\\", \\"gemini-3.7-flash\\\", \\"gemini-3.6-flash\\\"];"
+      [
+        "  const modelErrors: string[] = [];",
+        "  const modelCandidates = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash'];"
+      ].join("\n")
     );
   }
   return source;
