@@ -1,4 +1,7 @@
-import { SystemUnderStudy, InterviewSession, InterviewGuide, InterviewQuestion, UserActivity, InterviewType } from '../types';
+import { SystemUnderStudy, InterviewSession, InterviewGuide, InterviewQuestion, UserActivity, InterviewType, InterviewResponse } from '../types';
+import { cacheUser,clearCachedUser,getCachedUser,cacheSystems,getCachedSystems,cacheInterviews,getCachedInterviews,cacheInterview,cacheShareInterview,getCachedShareInterview,removeCachedInterview,getOfflineSnapshot,markLastSync,getLastSync,makeOfflineId,isOnline } from './offlineStore';
+import { localAnalyzeResponse,localSuggestQuestions,localRealtimeCopilot,localGuide,localCrossCompare,localChat,localTranscriptionFallback,LOCAL_AI_MODELS,LOCAL_MODEL } from './offlineAI';
+import { saveVideoBlob,calculateCompressionStats } from './videoStorage';
 
 const TOKEN_KEY = 'reqvoice_auth_token';
 
@@ -437,4 +440,66 @@ export const api = {
         body: JSON.stringify(data),
       }),
   },
+};
+
+
+/* Hybrid offline-first adapters. Online endpoints remain the source of truth; IndexedDB is the local working copy. */
+const onlineAuthMe = api.auth.me;
+const onlineAuthLogin = api.auth.login;
+const onlineAuthRegister = api.auth.register;
+const onlineAuthLogout = api.auth.logout;
+const onlineSystemsList = api.systems.list;
+const onlineSystemsCreate = api.systems.create;
+const onlineSystemsDelete = api.systems.delete;
+const onlineInterviewsList = api.interviews.list;
+const onlineInterviewGet = api.interviews.get;
+const onlineInterviewCreate = api.interviews.create;
+const onlineSaveResponse = api.interviews.saveResponse;
+const onlineFinish = api.interviews.finish;
+const onlineInterviewDelete = api.interviews.delete;
+const onlineShareGet = api.share.getPublicInterview;
+const onlineShareUpload = api.share.uploadVideo;
+const onlineShareSubmit = api.share.submitAnswer;
+const onlineTranscribe = api.gemini.transcribeVideo;
+const onlineAnalyze = api.gemini.analyzeResponse;
+const onlineSuggest = api.gemini.suggestQuestions;
+const onlineGuide = api.gemini.generateGuide;
+const onlineCopilot = api.gemini.realtimeCopilot;
+const onlineCompare = api.gemini.crossCompare;
+const onlineModels = api.aiChat.getModels;
+const onlineChat = api.aiChat.sendMessage;
+
+api.auth.me = async () => { try { const r=await onlineAuthMe(); await cacheUser(r.user); return r; } catch(e) { const user=await getCachedUser(); if(user)return {user}; throw e; } };
+api.auth.login = async (usernameOrEmail:string,password?:string) => { const r=await onlineAuthLogin(usernameOrEmail,password); await cacheUser(r.user); return r; };
+api.auth.register = async (data:any) => { const r=await onlineAuthRegister(data); await cacheUser(r.user); return r; };
+api.auth.logout = async () => { try { return await onlineAuthLogout(); } finally { await clearCachedUser(); } };
+
+api.systems.list = async () => { try { const r=await onlineSystemsList(); await cacheSystems(r.systems||[]); return r; } catch(e) { if(!isOnline()) return {systems:await getCachedSystems()}; throw e; } };
+api.systems.create = async (data:any) => { try { const r=await onlineSystemsCreate(data); await cacheSystems([...(await getCachedSystems()).filter(s=>s.id!==r.system.id),r.system]); return r; } catch(e) { if(isOnline())throw e; const user=await getCachedUser(); const system:any={id:makeOfflineId('system'),userId:user?.id,name:data.name||'Offline System',type:data.type||'Enterprise System',description:data.description||'',lifecycleState:data.lifecycleState||'proposed',targetRoles:Array.isArray(data.targetRoles)?data.targetRoles:[],createdAt:new Date().toISOString()}; await cacheSystems([...(await getCachedSystems()),system]); return {system}; } };
+api.systems.delete = async (id:string) => { try { const r=await onlineSystemsDelete(id); await cacheSystems((await getCachedSystems()).filter(s=>s.id!==id)); return r; } catch(e) { if(!isOnline()){await cacheSystems((await getCachedSystems()).filter(s=>s.id!==id));return {success:true};}throw e; } };
+
+api.interviews.list = async (systemId?:string) => { try { const r=await onlineInterviewsList(systemId); await cacheInterviews(r.interviews||[]); return r; } catch(e) { if(!isOnline()){const all=await getCachedInterviews();return {interviews:systemId?all.filter(i=>i.systemId===systemId):all};}throw e; } };
+api.interviews.get = async (id:string) => { try { const r=await onlineInterviewGet(id); await cacheInterview(r.interview); return r; } catch(e) { if(!isOnline()){const i=(await getCachedInterviews()).find(x=>x.id===id);if(i)return {interview:i};}throw e; } };
+api.interviews.create = async (data:any) => { try { const r=await onlineInterviewCreate(data); await cacheInterview(r.interview); return r; } catch(e) { if(isOnline())throw e; const user=await getCachedUser();const system=(await getCachedSystems()).find(s=>s.id===data.systemId);const questions=(data.questions||[]).map((q:any,i)=>({id:q.id||makeOfflineId('question')+'-'+i,category:q.category||'workflow',questionText:q.questionText||'',rationale:q.rationale||'',suggestedFollowups:q.suggestedFollowups||[]}));const interview:any={id:makeOfflineId('interview'),userId:user?.id,systemId:data.systemId,systemName:system?.name||'Offline System',interviewerName:user?.name||'Offline User',interviewerRole:user?.role||'Requirements Engineer',interviewerDept:user?.department||'',intervieweeName:data.intervieweeName,intervieweeRole:data.intervieweeRole||'',intervieweeEmail:data.intervieweeEmail,intervieweeDept:data.intervieweeDept,shareToken:'offline-share-'+Math.random().toString(36).slice(2)+Date.now().toString(36),status:'in_progress',interviewType:data.interviewType,questions,responses:{},createdAt:new Date().toISOString()};await cacheInterview(interview);return {interview}; } };
+api.interviews.saveResponse = async (id:string,data:any) => { try { const r=await onlineSaveResponse(id,data);const inv=(await getCachedInterviews()).find(i=>i.id===id);if(inv)await cacheInterview({...inv,responses:{...inv.responses,[data.questionId]:r.response}});return r; } catch(e) { if(isOnline())throw e;const inv=(await getCachedInterviews()).find(i=>i.id===id);if(!inv)throw e;const q=inv.questions.find(x=>x.id===data.questionId);const response:InterviewResponse={id:makeOfflineId('response'),interviewId:id,questionId:data.questionId,questionText:q?.questionText||'',category:q?.category||'workflow',responseText:data.responseText||'',audioDurationSeconds:data.audioDurationSeconds||0,videoRecording:data.videoRecording,aiTranscript:data.aiTranscript,createdAt:new Date().toISOString()};const next={...inv,responses:{...inv.responses,[data.questionId]:response}};await cacheInterview(next);return {success:true,response}; } };
+api.interviews.finish = async (id:string) => { try { const r=await onlineFinish(id);await cacheInterview(r.interview);return r; } catch(e) { if(isOnline())throw e;const inv=(await getCachedInterviews()).find(i=>i.id===id);if(!inv)throw e;const text=Object.values(inv.responses||{}).map((r:any)=>r.responseText||'').filter(Boolean).join('\n');const a=localAnalyzeResponse({text:text||'No responses recorded'});const summary:any={executiveSummary:'Offline summary generated from recorded stakeholder responses.',overallSentiment:{dominant:a.sentiment,positiveRatio:a.sentiment==='positive'?1:0,negativeRatio:a.sentiment==='negative'?1:0,neutralRatio:a.sentiment==='neutral'?1:0},currentWorkflows:inv.questions.filter(q=>q.category==='workflow').map(q=>q.questionText),userExpectations:inv.questions.filter(q=>q.category==='expectation').map(q=>q.questionText),systemLimitations:a.keyRequirements.filter(x=>/limit|problem|issue|error|slow/i.test(x)),recommendedFeatures:a.keyRequirements.slice(0,5).map(x=>({name:x,priority:'Medium',rationale:'Identified by local offline requirements analysis.'})),synthesizedAt:new Date().toISOString()};const next:any={...inv,status:'completed',completedAt:new Date().toISOString(),summaryReport:summary};await cacheInterview(next);return {interview:next,summaryReport:summary}; } };
+api.interviews.delete = async (id:string) => { try {const r=await onlineInterviewDelete(id);await removeCachedInterview(id);return r;}catch(e){if(!isOnline()){await removeCachedInterview(id);return {success:true};}throw e;} };
+
+api.share.getPublicInterview = async (token:string) => { try {const r:any=await onlineShareGet(token);await cacheShareInterview(token,r);return r;}catch(e){const c=await getCachedShareInterview(token);if(c)return c as any;throw e;} };
+api.share.uploadVideo = async (token:string,questionId:string,videoId:string,blob:Blob,durationSeconds:number) => { if(isOnline())return onlineShareUpload(token,questionId,videoId,blob,durationSeconds);const blobUrl=await saveVideoBlob(videoId,blob,durationSeconds);const videoRecording:any={id:videoId,videoUrl:blobUrl,videoBlobKey:videoId,mimeType:blob.type||'video/webm',sourceMimeType:blob.type||'video/webm',deliveryMimeType:blob.type||'video/webm',storageStatus:'pending',durationSeconds,compressionStats:calculateCompressionStats(durationSeconds,blob.size),recordedAt:new Date().toISOString()};return {success:true,videoRecording}; };
+api.share.submitAnswer = async (token:string,data:any) => { try {const r=await onlineShareSubmit(token,data);const c=await getCachedShareInterview(token);if(c)await cacheShareInterview(token,{...c,responses:{...c.responses,[data.questionId]:r.response}});return r;}catch(e){if(isOnline())throw e;const c=await getCachedShareInterview(token);if(!c)throw e;const q=c.questions.find(x=>x.id===data.questionId);const existing:any=(c.responses||{})[data.questionId];const response=existing?{...existing,...data}:{id:makeOfflineId('response'),interviewId:c.id,questionId:data.questionId,questionText:q?.questionText||'',category:q?.category||'workflow',responseText:data.responseText||'',audioDurationSeconds:data.audioDurationSeconds||0,videoRecording:data.videoRecording,aiTranscript:data.aiTranscript,createdAt:new Date().toISOString()};const next={...c,responses:{...c.responses,[data.questionId]:response}};await cacheShareInterview(token,next);await cacheInterview(next);return {success:true,response,isComplete:Object.keys(next.responses||{}).length>=next.questions.length};} };
+
+api.gemini.transcribeVideo = (data:any) => onlineTranscribe(data).catch(()=>localTranscriptionFallback(data.questionText));
+api.gemini.analyzeResponse = (data:any) => onlineAnalyze(data).catch(()=>localAnalyzeResponse(data) as any);
+api.gemini.suggestQuestions = (data:any) => onlineSuggest(data).catch(()=>localSuggestQuestions(data) as any);
+api.gemini.generateGuide = (data:any) => onlineGuide(data).catch(()=>localGuide(data.systemName,data.role) as any);
+api.gemini.realtimeCopilot = (data:any) => onlineCopilot(data).catch(()=>localRealtimeCopilot(data) as any);
+api.gemini.crossCompare = (systemId:string,interviewIds?:string[]) => onlineCompare(systemId,interviewIds).catch(async()=>localCrossCompare((await getCachedInterviews()).filter(i=>!interviewIds||interviewIds.includes(i.id))) as any);
+
+api.aiChat.getModels = () => onlineModels().catch(()=>({models:LOCAL_AI_MODELS as any}));
+api.aiChat.sendMessage = (data:any) => onlineChat(data).catch(()=>({reply:localChat(data.message,(data.history||[]).map((h:any)=>h.content).join('\n')),modelUsed:LOCAL_MODEL,timestamp:new Date().toISOString()} as any));
+
+(api as any).offline = {
+ snapshot:getOfflineSnapshot,lastSync:getLastSync,hasCachedUser:async()=>!!(await getCachedUser()),
+ sync:async()=>{if(!isOnline())return{success:false,offline:true};const snapshot=await getOfflineSnapshot();const token=api.auth.getToken();if(!token||!snapshot.user)return{success:false,skipped:true};const response=await fetch('/api/offline/sync',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(snapshot)});if(!response.ok)throw new Error('Offline synchronization failed ('+response.status+')');const data=await response.json();await cacheSystems(data.systems||snapshot.systems);await cacheInterviews(data.interviews||snapshot.interviews);await markLastSync();return data;}
 };

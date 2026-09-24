@@ -1,0 +1,21 @@
+name: ReqVoice offline-first validation
+on:
+  push:
+    branches: [feature/offline-first-hybrid]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install
+        run: npm install --no-package-lock
+      - name: Typecheck
+        run: npm run lint
+      - name: Build
+        run: npm run build

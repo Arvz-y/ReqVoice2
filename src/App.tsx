@@ -26,6 +26,7 @@ import { ProfileModal } from './components/ProfileModal';
 import { AIChatAssistant } from './components/AIChatAssistant';
 import { AnalyticsView } from './components/AnalyticsView';
 import { MobileExperienceMode } from './components/MobileExperienceMode';
+import { ConnectionStatus } from './components/ConnectionStatus';
 import { api } from './lib/api';
 import { SystemUnderStudy, InterviewSession, UserProfile } from './types';
 
@@ -95,8 +96,7 @@ export function App() {
     setAuthChecking(true);
     try {
       const token = api.auth.getToken();
-      if (!token) {
-        // Enforce: User must always login first upon accessing the website
+      if (!token && !(await (api as any).offline.hasCachedUser())) {
         setIsAuthenticated(false);
         setCurrentUser(null);
         setAuthChecking(false);
@@ -118,6 +118,7 @@ export function App() {
         ]);
         setSystems(sysRes.systems || []);
         setInterviews(invRes.interviews || []);
+        void (api as any).offline.sync().catch(() => {});
         if (invRes.interviews?.length > 0 && !selectedInterviewId) {
           setSelectedInterviewId(invRes.interviews[0].id);
         }
@@ -241,6 +242,8 @@ export function App() {
       <div className="flex-1 flex flex-col min-w-0 transition-all duration-300">
         
         {/* Top Header */}
+        <ConnectionStatus />
+
         <TopBar
           currentUser={currentUser}
           activeTab={activeTab}
