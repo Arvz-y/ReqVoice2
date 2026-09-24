@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { api } from '../lib/api';
 import { useLanguage } from './LanguageContext';
 
