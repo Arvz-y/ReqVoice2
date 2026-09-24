@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { SystemUnderStudy, InterviewQuestion, InterviewType } from '../types';
 import { api } from '../lib/api';
+import { useLanguage } from './LanguageContext';
 
 interface CreateInterviewModalProps {
   systems: SystemUnderStudy[];
@@ -179,6 +180,7 @@ const INTERVIEW_TYPE_DETAILS: Record<
 };
 
 export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
+  const { language } = useLanguage();
   systems,
   isOpen,
   onClose,
@@ -265,6 +267,7 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
         promptVersion: promptVersion + 1,
         count: questionCount,
         interviewType: type,
+        language: language.name,
       });
 
       if (res.questions && res.questions.length > 0) {
@@ -297,6 +300,7 @@ export const CreateInterviewModal: React.FC<CreateInterviewModalProps> = ({
         promptVersion,
         count: questionCount,
         interviewType: interviewType,
+        language: language.name,
       });
 
       if (res.questions && res.questions.length > 0) {
