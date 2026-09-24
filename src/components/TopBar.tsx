@@ -17,6 +17,7 @@ import {
 import { UserProfile } from '../types';
 import { MobileInstallBanner } from './MobileInstallBanner';
 import { useTheme } from './ThemeContext';
+import { LanguageSelector } from './LanguageSelector';
 
 interface TopBarProps {
   currentUser: UserProfile;
@@ -107,7 +108,9 @@ export const TopBar: React.FC<TopBarProps> = ({
           <MobileInstallBanner compact={true} />
         </div>
 
-        {/* Quick Light / Dark Mode Toggle Button */}
+        <LanguageSelector />
+
+        {/* Quick Light / Dark Mode Toggle Button */
         <button
           id="btn-quick-theme-toggle"
           onClick={toggleTheme}
