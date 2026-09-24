@@ -198,8 +198,9 @@ export const TranslationLayer: React.FC = () => {
       for (const el of elements) {
         const saved = originalAttrs.get(el);
         if (!saved) continue;
-        Object.entries(saved).forEach(([attr, value]) => {
-          if (el.getAttribute(attr) !== value) el.setAttribute(attr, value);
+        Object.entries(saved).forEach(([attr, meta]) => {
+          if (el.getAttribute(attr) !== meta.source) el.setAttribute(attr, meta.source);
+          meta.lastTranslated = meta.source;
         });
       }
     };
