@@ -1,6 +1,6 @@
 import { SystemUnderStudy, InterviewSession, InterviewGuide, InterviewQuestion, UserActivity, InterviewType, InterviewResponse } from '../types';
 import { cacheUser,getCachedUser,cacheSystems,getCachedSystems,cacheInterviews,getCachedInterviews,cacheInterview,cacheShareInterview,getCachedShareInterview,removeCachedInterview,getOfflineSnapshot,markLastSync,getLastSync,makeOfflineId,isOnline } from './offlineStore';
-import { localAnalyzeResponse,localSuggestQuestions,localRealtimeCopilot,localGuide,localCrossCompare,localChat,localTranscriptionFallback,LOCAL_AI_MODELS } from './offlineAI';
+import { localAnalyzeResponse,localSuggestQuestions,localRealtimeCopilot,localGuide,localCrossCompare,localChat,localTranscriptionFallback,LOCAL_AI_MODELS,LOCAL_MODEL } from './offlineAI';
 import { saveVideoBlob,calculateCompressionStats } from './videoStorage';
 
 const TOKEN_KEY = 'reqvoice_auth_token';
