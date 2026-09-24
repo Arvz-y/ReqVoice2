@@ -74,9 +74,15 @@ function collectAttributeTargets(root: HTMLElement) {
       const value = el.getAttribute(attr);
       if (!value || value.length < 2) continue;
       const saved = originalAttrs.get(el) || {};
-      if (!saved[attr]) saved[attr] = value;
+      const meta = saved[attr];
+      if (!meta) {
+        saved[attr] = { source: value, lastTranslated: value };
+      } else if (value !== meta.lastTranslated && value !== meta.source) {
+        meta.source = value;
+        meta.lastTranslated = value;
+      }
       originalAttrs.set(el, saved);
-      targets.push({ el, attr, source: saved[attr] });
+      targets.push({ el, attr, source: saved[attr].source });
     }
   }
   return targets;
@@ -102,7 +108,11 @@ async function translateAttributes(targets: Array<{ el: Element; attr: string; s
   targets.forEach(({ el, attr, source }) => {
     if (el.isConnected) {
       const translated = cache.get(target + '|' + source);
-      if (translated) el.setAttribute(attr, translated);
+      if (translated) {
+        el.setAttribute(attr, translated);
+        const saved = originalAttrs.get(el);
+        if (saved?.[attr]) saved[attr].lastTranslated = translated;
+      }
     }
   });
 }
