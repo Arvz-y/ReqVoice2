@@ -52,8 +52,11 @@ function localTagalog(source:string) {
     ['No active interview session selected.','Walang napiling aktibong interview session.'],['Sign Out','Mag-sign Out']
   ];
   let value=source;
-  for(const [from,to] of phrases) value=value.replace(new RegExp(from.replace(/[.*+?^$()|[\\]\\\\]/g,'\\\\const cache = new Map<string, string>();'),'gi'),to);
-  return value.split(/(\\s+|[^A-Za-z0-9À-ÿ'-]+)/).map(p=>tagalogWords[p.toLowerCase()]||p).join('');
+  for(const [from,to] of phrases) {
+    const escaped=from.replace(/[.*+?^$()|[\]\\]/g,'\\$&');
+    value=value.replace(new RegExp(escaped,'gi'),to);
+  }
+  return value.split(/(\s+|[^A-Za-z0-9À-ÿ'-]+)/).map(p=>tagalogWords[p.toLowerCase()]||p).join('');
 }
 
 const cache = new Map<string, string>();
