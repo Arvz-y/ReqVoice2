@@ -373,6 +373,7 @@ export const api = {
       count?: number;
       promptVersion?: number;
       interviewType?: 'Structured' | 'Semi-Structured' | 'Unstructured';
+      language?: string;
     }) =>
       request<{ questions: InterviewQuestion[] }>('/api/gemini/suggest-questions', {
         method: 'POST',
@@ -411,6 +412,13 @@ export const api = {
   videos: {
     getUrl: (id: string) => `/api/videos/${id}/playback`,
     getDownloadUrl: (id: string) => `/api/videos/${id}/download`,
+  },
+  i18n: {
+    translate: (data: { texts: string[]; targetLanguage: string; sourceLanguage?: string }) =>
+      request<{ translations: string[] }>('/api/i18n/translate', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
   aiChat: {
     getModels: () =>
