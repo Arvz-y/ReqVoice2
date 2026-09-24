@@ -47,7 +47,7 @@ patch('server.ts', (source) => {
   return source.replace(marker, route + marker);
 });
 
-patch(server, (source) => {
+patch('server.ts', (source) => {
   source = source.replace(
     "  if (ai && mediaData) {\n    try {\n      // Prefer the server-side video database record",
     "  if (ai && mediaData) {\n    let contents: any;\n    try {\n      // Prefer the server-side video database record"
