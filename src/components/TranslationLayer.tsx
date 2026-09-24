@@ -60,8 +60,10 @@ function localTagalog(source:string) {
 }
 
 const cache = new Map<string, string>();
-const originalText = new WeakMap<Text, string>();
-const originalAttrs = new WeakMap<Element, Record<string, string>>();
+type TextTranslationMeta = { source: string; lastTranslated: string };
+type AttributeTranslationMeta = { source: string; lastTranslated: string };
+const originalText = new WeakMap<Text, TextTranslationMeta>();
+const originalAttrs = new WeakMap<Element, Record<string, AttributeTranslationMeta>>();
 
 function collectAttributeTargets(root: HTMLElement) {
   const targets: Array<{ el: Element; attr: string; source: string }> = [];
