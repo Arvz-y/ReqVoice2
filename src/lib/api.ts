@@ -438,6 +438,7 @@ export const api = {
       model?: string;
       history?: Array<{ role: 'user' | 'assistant'; content: string }>;
       systemContextId?: string;
+      language?: string;
     }) =>
       request<{
         reply: string;
