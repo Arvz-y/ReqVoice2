@@ -3647,7 +3647,7 @@ app.get("/api/ai/models", (_req: Request, res: Response) => {
 
 app.post("/api/ai/chat", async (req: Request, res: Response) => {
   try {
-    const { message, model = "gemini-2.5-flash", history = [], systemContextId } = req.body;
+    const { message, model = "gemini-2.5-flash", history = [], systemContextId, language = "English" } = req.body;
 
     if (!message || typeof message !== "string" || !message.trim()) {
       res.status(400).json({ error: "Message cannot be empty." });
@@ -3720,7 +3720,7 @@ Platform State Knowledge:
           contents,
           config: {
             systemInstruction: domainKnowledge + `
-Be precise, structured, and insightful. When asked for requirements, format them cleanly using IEEE 830 / ISO 29148 standards (e.g. Functional, Non-Functional, Interface, Performance, and Security requirements with prioritization MoSCoW: Must/Should/Could/Won't). Always cite stakeholder evidence when available.`,
+Be precise, structured, and insightful. Always answer in ${language} unless the user explicitly asks for another language. Preserve system names, model names, URLs, acronyms, standards, numbers, and technical identifiers. When asked for requirements, format them cleanly using IEEE 830 / ISO 29148 standards (e.g. Functional, Non-Functional, Interface, Performance, and Security requirements with prioritization MoSCoW: Must/Should/Could/Won't). Always cite stakeholder evidence when available.`,
             temperature: 0.3,
           },
         },
