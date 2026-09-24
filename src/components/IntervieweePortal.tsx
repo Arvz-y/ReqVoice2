@@ -26,6 +26,7 @@ import { api } from '../lib/api';
 import { saveVideoBlob, deleteVideoBlob, getVideoBlobUrl, calculateCompressionStats } from '../lib/videoStorage';
 import { InterviewQuestion } from '../types';
 import { useTheme } from './ThemeContext';
+import { LanguageSelector } from './LanguageSelector';
 
 interface IntervieweePortalProps {
   token: string;
@@ -99,7 +100,7 @@ export const IntervieweePortal: React.FC<IntervieweePortalProps> = ({
   // Load interview details
   useEffect(() => {
     loadInterview();
-    return () => {
+    return (\n    <div className="relative">\n      <div className="absolute top-4 right-4 z-20"><LanguageSelector /></div>) => {
       stopCamera();
     };
   }, [token]);
