@@ -2869,8 +2869,8 @@ Format as JSON array of objects:
         : `You are an expert Systems Requirements Analyst conducting a ${interviewType.toUpperCase()} INTERVIEW.
 ${typeGuidance}
 
-Generate ${numQuestions} targeted, high-impact interview questions for the role "${role || "Stakeholder"}" on the system "${systemName || "Enterprise System"}" (${systemType || "Business Application"}).
-LANGUAGE REQUIREMENT: Write questionText, rationale, and every suggestedFollowups item entirely in ${language}. Do not mix languages unless a proper product/system name or technical term must remain unchanged.
+Generate exactly ${numQuestions} targeted, high-impact interview questions for the role "${role || "Stakeholder"}" on the system "${systemName || "Enterprise System"}" (${systemType || "Business Application"}).
+LANGUAGE REQUIREMENT: Write questionText, rationale, and every suggestedFollowups item entirely in ${language}. If the selected language is Tagalog, use natural Filipino/Tagalog grammar and vocabulary, not English sentences with a few translated words. Do not mix languages unless a proper product/system name or technical term must remain unchanged.
 Cover requirements categories: workflow, pain_point, expectation, limitation, desired_feature.
 Format as JSON array of objects:
 [
