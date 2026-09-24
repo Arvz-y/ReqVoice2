@@ -1,5 +1,5 @@
 import { SystemUnderStudy, InterviewSession, InterviewGuide, InterviewQuestion, UserActivity, InterviewType, InterviewResponse } from '../types';
-import { cacheUser,getCachedUser,cacheSystems,getCachedSystems,cacheInterviews,getCachedInterviews,cacheInterview,cacheShareInterview,getCachedShareInterview,removeCachedInterview,getOfflineSnapshot,markLastSync,getLastSync,makeOfflineId,isOnline } from './offlineStore';
+import { cacheUser,clearCachedUser,getCachedUser,cacheSystems,getCachedSystems,cacheInterviews,getCachedInterviews,cacheInterview,cacheShareInterview,getCachedShareInterview,removeCachedInterview,getOfflineSnapshot,markLastSync,getLastSync,makeOfflineId,isOnline } from './offlineStore';
 import { localAnalyzeResponse,localSuggestQuestions,localRealtimeCopilot,localGuide,localCrossCompare,localChat,localTranscriptionFallback,LOCAL_AI_MODELS,LOCAL_MODEL } from './offlineAI';
 import { saveVideoBlob,calculateCompressionStats } from './videoStorage';
 
@@ -447,6 +447,7 @@ export const api = {
 const onlineAuthMe = api.auth.me;
 const onlineAuthLogin = api.auth.login;
 const onlineAuthRegister = api.auth.register;
+const onlineAuthLogout = api.auth.logout;
 const onlineSystemsList = api.systems.list;
 const onlineSystemsCreate = api.systems.create;
 const onlineSystemsDelete = api.systems.delete;
@@ -471,6 +472,7 @@ const onlineChat = api.aiChat.sendMessage;
 api.auth.me = async () => { try { const r=await onlineAuthMe(); await cacheUser(r.user); return r; } catch(e) { const user=await getCachedUser(); if(user)return {user}; throw e; } };
 api.auth.login = async (...args:any[]) => { const r=await onlineAuthLogin(...args); await cacheUser(r.user); return r; };
 api.auth.register = async (...args:any[]) => { const r=await onlineAuthRegister(...args); await cacheUser(r.user); return r; };
+api.auth.logout = async () => { try { return await onlineAuthLogout(); } finally { await clearCachedUser(); } };
 
 api.systems.list = async () => { try { const r=await onlineSystemsList(); await cacheSystems(r.systems||[]); return r; } catch(e) { if(!isOnline()) return {systems:await getCachedSystems()}; throw e; } };
 api.systems.create = async (data:any) => { try { const r=await onlineSystemsCreate(data); await cacheSystems([...(await getCachedSystems()).filter(s=>s.id!==r.system.id),r.system]); return r; } catch(e) { if(isOnline())throw e; const user=await getCachedUser(); const system:any={id:makeOfflineId('system'),userId:user?.id,name:data.name||'Offline System',type:data.type||'Enterprise System',description:data.description||'',lifecycleState:data.lifecycleState||'proposed',targetRoles:Array.isArray(data.targetRoles)?data.targetRoles:[],createdAt:new Date().toISOString()}; await cacheSystems([...(await getCachedSystems()),system]); return {system}; } };
