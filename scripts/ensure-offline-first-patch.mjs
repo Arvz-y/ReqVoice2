@@ -52,7 +52,7 @@ patch(server, (source) => {
     "  if (ai && mediaData) {\n    try {\n      // Prefer the server-side video database record",
     "  if (ai && mediaData) {\n    let contents: any;\n    try {\n      // Prefer the server-side video database record"
   );
-  source = source.replace("      const contents = {", "      contents = {");
+  source = source.replace("      const contents = {\n        parts:", "      contents = {\n        parts:");
   source = source.replace("        mediaBuffer = remoteVideo.buffer;", "        mediaBuffer = remoteVideo.buffer as any;");
   source = source.replace(
     "  const modelErrors: string[] = [];",
