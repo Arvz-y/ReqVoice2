@@ -470,8 +470,8 @@ const onlineModels = api.aiChat.getModels;
 const onlineChat = api.aiChat.sendMessage;
 
 api.auth.me = async () => { try { const r=await onlineAuthMe(); await cacheUser(r.user); return r; } catch(e) { const user=await getCachedUser(); if(user)return {user}; throw e; } };
-api.auth.login = async (...args:any[]) => { const r=await onlineAuthLogin(...args); await cacheUser(r.user); return r; };
-api.auth.register = async (...args:any[]) => { const r=await onlineAuthRegister(...args); await cacheUser(r.user); return r; };
+api.auth.login = async (usernameOrEmail:string,password?:string) => { const r=await onlineAuthLogin(usernameOrEmail,password); await cacheUser(r.user); return r; };
+api.auth.register = async (data:any) => { const r=await onlineAuthRegister(data); await cacheUser(r.user); return r; };
 api.auth.logout = async () => { try { return await onlineAuthLogout(); } finally { await clearCachedUser(); } };
 
 api.systems.list = async () => { try { const r=await onlineSystemsList(); await cacheSystems(r.systems||[]); return r; } catch(e) { if(!isOnline()) return {systems:await getCachedSystems()}; throw e; } };
