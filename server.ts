@@ -2977,7 +2977,20 @@ app.post("/api/i18n/translate", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const prompt = `Translate each item from ${sourceLanguage} to ${targetLanguage}. Preserve names, product names, model names, numbers, URLs, acronyms, and technical identifiers. Return ONLY a JSON array of strings in the exact same order and count. Do not summarize or omit anything.
+    const prompt = `You are a professional Filipino language translator for a software application.
+Translate each item from ${sourceLanguage} to ${targetLanguage}.
+
+LANGUAGE QUALITY RULES:
+- When the target language is Tagalog or Filipino, use proper, natural, grammatically correct Filipino/Tagalog.
+- NEVER use Taglish, conyo, or Filipino sentences mixed with unnecessary English words.
+- Translate ordinary interface text, buttons, labels, instructions, questions, explanations, chatbot messages, system descriptions, analytics findings, summaries, and generated interview content fully into Filipino.
+- Use established Filipino equivalents when they are natural and understandable.
+- English may remain only for proper names, product/model names, URLs, acronyms, programming identifiers, standards, and genuinely technical terms that have no clear natural Filipino equivalent.
+- Do not merely replace a few English words; translate the complete meaning and sentence naturally.
+- Preserve names, product names, model names, numbers, URLs, acronyms, standards, and technical identifiers when appropriate.
+- Return ONLY a JSON array of strings in the exact same order and count.
+- Do not summarize, shorten, omit, or add anything.
+
 INPUT:
 ${JSON.stringify(texts)}`;
     const generation = await generateWithAvailableGeminiModel(
