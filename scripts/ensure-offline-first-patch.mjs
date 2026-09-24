@@ -54,9 +54,6 @@ patch('server.ts', (source) => {
   );
   source = source.replace("      const contents = {\n        parts:", "      contents = {\n        parts:");
   source = source.replace("        mediaBuffer = remoteVideo.buffer;", "        mediaBuffer = remoteVideo.buffer as any;");
-  source = source.replace(
-    "  const modelErrors: string[] = [];",
-    "  const modelErrors: string[] = [];\n  const modelCandidates = [\"gemini-3.5-flash-lite\", \"gemini-3.8-flash\", \"gemini-3.7-flash\", \"gemini-3.6-flash\"];"
-  );
+  if (!source.includes("const modelCandidates =")) {\n    source = source.replace(\n      "  const modelErrors: string[] = [];",\n      "  const modelErrors: string[] = [];\\n  const modelCandidates = [\\\"gemini-3.5-flash-lite\\\", \\\"gemini-3.8-flash\\\", \\\"gemini-3.7-flash\\\", \\\"gemini-3.6-flash\\\"];"\n    );\n  }
   return source;
 });
